@@ -30,7 +30,7 @@ function reportStartFailure(error) {
 async function start() {
   try {
     const go = new Go();
-    const response = await fetch('ofd.wasm?v=a375d32c49c85955');
+    const response = await fetch('ofd.wasm?v=4f949f74b73c5176');
     if (!response.ok) {
       reportStartFailure(new Error(`加载 ofd.wasm 失败: ${response.status}`));
       return;
