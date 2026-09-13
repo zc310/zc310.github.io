@@ -379,6 +379,27 @@ let thumbnailVirtualUpdateFrame;
 let thumbnailFollowTimer;
 let thumbnailMetrics = { mobile: false, columns: 1, rowHeight: 160, gap: 10, itemWidth: 72, itemHeight: 102 };
 
+if (typeof window.matchMedia !== 'function') {
+  window.matchMedia = query => {
+    const media = String(query);
+    return {
+      matches: false,
+      media,
+      onchange: null,
+      addListener() {},
+      removeListener() {},
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent() { return false; },
+    };
+  };
+}
+
+if (typeof window.requestAnimationFrame !== 'function') {
+  window.requestAnimationFrame = callback => setTimeout(() => callback(Date.now()), 16);
+  window.cancelAnimationFrame = id => clearTimeout(id);
+}
+
 function createResizeObserver(callback) {
   if (typeof ResizeObserver === 'function') return new ResizeObserver(callback);
 
@@ -891,7 +912,9 @@ async function openRecentFile(id) {
   const record = recentFiles.find(item => item.id === id);
   if (!record?.data) return;
   setRecentPanelOpen(false);
-  const recent = new File([record.data], record.name, { type: 'application/ofd', lastModified: record.lastModified || record.lastOpened });
+  const recent = typeof File === 'function'
+    ? new File([record.data], record.name, { type: 'application/ofd', lastModified: record.lastModified || record.lastOpened })
+    : Object.assign(new Blob([record.data], { type: 'application/ofd' }), { name: record.name });
   await openSelectedFile(recent);
 }
 
@@ -2125,7 +2148,9 @@ function updateDocumentInfo() {
     infoBody.innerHTML = '<p class="info-empty">未打开文档</p>';
     return;
   }
+  const generation = documentGeneration;
   engine.info().then(info => {
+    if (generation !== documentGeneration) return;
     const rows = [];
     if (info.docID) rows.push(['文档标识', info.docID]);
     if (info.title) rows.push(['标题', info.title]);
@@ -2145,6 +2170,7 @@ function updateDocumentInfo() {
       `<div class="info-row"><span class="info-label">${label}</span><span class="info-value">${escapeHTML(value)}</span></div>`
     ).join('');
   }).catch(() => {
+    if (generation !== documentGeneration) return;
     infoBody.innerHTML = '<p class="info-empty">获取信息失败</p>';
   });
 }
