@@ -25,6 +25,8 @@ cmd/ofd-wasm/web/ofd.wasm
 cmd/ofd-wasm/web/wasm_exec.js
 ```
 
+同时会按 `viewer.js`、`worker.js`、`wasm_exec.js`、`ofd.wasm` 的内容哈希把 `service-worker.js` 的缓存名写为 `ofd-reader-shell_<hash>`。
+
 ## 运行
 
 浏览器不能直接通过 `file://` 加载 WASM。可以在 `cmd/ofd-wasm/web` 目录启动任意静态 HTTP 服务：
@@ -39,9 +41,14 @@ python3 -m http.server 8080 --directory cmd/ofd-wasm/web
 
 ## 资源缓存与更新
 
-阅读器同时受到浏览器 HTTP 缓存、Service Worker 缓存和 Web Worker 脚本缓存影响。当前 `service-worker.js` 使用 `cache-first` 策略：资源已经进入 Cache Storage 后，普通刷新可能仍然使用旧版本；`Ctrl+F5` 也不一定能绕过 Service Worker。
+阅读器同时受到浏览器 HTTP 缓存、Service Worker 缓存和 Web Worker 脚本缓存影响。`service-worker.js` 使用 `cache-first` 策略：资源已经进入 Cache Storage 后，普通刷新可能仍然使用旧版本；`Ctrl+F5` 也不一定能绕过 Service Worker。
 
-当前示例的 Service Worker 缓存名为 `ofd-reader-shell`，页面脚本和 Web Worker 使用不带查询参数的固定路径。发布 `index.html`、`viewer.js`、`worker.js`、`ofd.wasm` 或 `wasm_exec.js` 的新版本时，应修改 `service-worker.js` 中的 `CACHE_NAME`，例如改为 `ofd-reader-shell-v8`，以淘汰旧缓存并重新缓存资源。
+页面脚本、Web Worker、`wasm_exec.js` 和 `ofd.wasm` 都使用不带查询参数的固定路径，缓存版本由 Service Worker 缓存名管理。`make build-wasm` / `make package-wasm-web` 会计算 `viewer.js`、`worker.js`、`wasm_exec.js`、`ofd.wasm` 的内容哈希，把 `service-worker.js` 的 `CACHE_NAME` 写成 `ofd-reader-shell_<hash>`：只要任一资源内容变化，缓存名就变化，新 Service Worker 安装后会删除旧缓存并重新缓存全部资源。
+
+客户端已经做了两处兜底，不依赖服务器配置即可保证更新：
+
+- 注册时使用 `{ updateViaCache: 'none' }`（`viewer.js`），浏览器检查 Service Worker 更新时绕过 HTTP 缓存，发布后第一次导航就能检测到新版本。
+- 安装预缓存时通过 `{ cache: 'no-cache' }` 的请求写入新缓存（`service-worker.js`），导航请求同样强制 `no-cache`，确保新缓存写入的是最新字节且 `index.html` 每次导航都会重新校验。
 
 
 建议生产环境配置以下响应头：
@@ -55,13 +62,7 @@ ofd.wasm            Cache-Control: no-cache, must-revalidate
 wasm_exec.js        Cache-Control: no-cache, must-revalidate
 ```
 
-更稳妥的生产方案是给 JavaScript 和 WASM 文件使用内容 hash 文件名，例如 `viewer.8f31c2.js`、`worker.a91d77.js` 和 `ofd.2b9f10.wasm`，并为这些文件设置长期缓存：
-
-```text
-Cache-Control: public, max-age=31536000, immutable
-```
-
-`index.html` 和 `service-worker.js` 应保持可重新验证，页面引用的 hash 文件内容变化时只需更新引用。发布时先上传新的 hash 资源，再更新 `service-worker.js`，最后更新 `index.html`，避免页面先引用尚未上传的资源。
+如果生产服务器不方便配置上面的响应头，可以改用内容 hash 文件名方案：给 `viewer.js`、`worker.js`、`ofd.wasm` 等生成带内容哈希的文件名并设置长期缓存，但此时不再符合“固定路径 + 哈希缓存名”的默认约定，`service-worker.js` 的预缓存列表也需要同步使用这些文件名。
 
 如果浏览器仍然显示旧版本，可以在开发者工具中打开 **Application**，执行 **Service Workers -> Unregister** 和 **Storage -> Clear site data**，然后重新加载页面。也可以在控制台检查当前控制页面的 Service Worker 和 Worker URL：
 

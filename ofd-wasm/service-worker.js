@@ -1,4 +1,7 @@
-const CACHE_NAME = 'ofd-reader-shell';
+// CACHE_NAME 由 make build-wasm / make package-wasm-web 根据
+// viewer.js、worker.js、wasm_exec.js、ofd.wasm 的内容哈希生成
+// ofd-reader-shell_<hash>；资源路径保持固定，发布时重新构建即可。
+const CACHE_NAME = 'ofd-reader-shell_a0640cc3184eebca';
 const SHELL_FILES = [
   './',
   './index.html',
@@ -12,8 +15,10 @@ const SHELL_FILES = [
   './icon-192.png',
 ];
 
+const freshRequest = url => new Request(url, { cache: 'no-cache' });
+
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL_FILES)));
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL_FILES.map(freshRequest))));
   self.skipWaiting();
 });
 
@@ -31,7 +36,7 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== self.location.origin) return;
   if (request.mode === 'navigate' || url.pathname.endsWith('/index.html')) {
-    event.respondWith(fetch(request).then(response => {
+    event.respondWith(fetch(request, { cache: 'no-cache' }).then(response => {
       if (response.ok) {
         const copy = response.clone();
         caches.open(CACHE_NAME).then(cache => cache.put('./index.html', copy));
