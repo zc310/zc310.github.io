@@ -22,10 +22,12 @@ self.addEventListener('install', event => {
   self.skipWaiting();
 });
 
+// ofd-fonts 由 viewer.js 维护，缓存内容寻址（不可变 URL）的回退字体，
+// 与应用版本无关，不应随应用更新被清理。
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys => Promise.all(
-      keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)),
+      keys.filter(key => key !== CACHE_NAME && key !== 'ofd-fonts').map(key => caches.delete(key)),
     )),
   );
   self.clients.claim();
