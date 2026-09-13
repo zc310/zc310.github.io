@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#172033">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,400..600,0..1,0" rel="stylesheet">
+  <title>OFD WASM 阅读器</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #cfd5de; color: #172033; }
+     header { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 18px; background: #172033; color: #fff; box-shadow: none; }
+
+    .brand { display: flex; min-width: 180px; flex: 1 1 220px; align-items: center; gap: 10px; }
+    .brand strong { white-space: nowrap; }
+    #document-name { overflow: hidden; max-width: 260px; color: #b9c4d6; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+     .toolbar-group { display: flex; align-items: center; gap: 4px; padding-left: 8px; border-left: 1px solid #ffffff2e; }
+    .toolbar-group.search-group { position: relative; min-width: 0; }
+    .toolbar-group.view-group { position: relative; }
+    .view-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 2; display: grid; min-width: 190px; gap: 8px; padding: 10px; border: 1px solid #c6cedb; border-radius: 6px; background: #fff; box-shadow: 0 5px 18px #17203340; color: #172033; }
+    .view-panel[hidden] { display: none; }
+    .view-option { display: flex; min-height: 32px; align-items: center; gap: 8px; padding: 4px; font-size: 14px; }
+    .view-option input { min-height: 0; }
+    .toolbar-group.recent-group { position: relative; }
+    .recent-panel { position: absolute; top: calc(100% + 8px); left: 0; z-index: 2; display: grid; min-width: 280px; gap: 6px; padding: 8px; border: 1px solid #c6cedb; border-radius: 6px; background: #fff; box-shadow: 0 5px 18px #17203340; color: #172033; }
+    .recent-panel[hidden] { display: none; }
+    .recent-header { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 6px; border-bottom: 1px solid #d7dce5; color: #667188; font-size: 12px; }
+    .recent-empty { padding: 8px; color: #667188; font-size: 13px; }
+    .recent-clear { min-height: 26px; padding: 2px 6px; border: 0; background: transparent; color: #b24b4b; font-size: 12px; }
+    .recent-clear:hover { background: #fbe8e8; }
+    .recent-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; width: 100%; padding: 8px; border: 0; border-radius: 4px; background: transparent; color: #172033; text-align: left; }
+    .recent-item:hover { background: #e8f1fb; }
+    .recent-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .recent-item small { grid-column: 1 / -1; color: #667188; font-size: 12px; }
+     .search-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 2; display: flex; min-width: 310px; align-items: center; gap: 6px; padding: 8px; border: 1px solid #c6cedb; border-radius: 6px; background: #fff; box-shadow: 0 5px 18px #17203340; }
+     .search-panel[hidden] { display: none; }
+     .print-dialog { width: min(420px, calc(100vw - 32px)); padding: 0; border: 0; border-radius: 10px; background: #fff; color: #172033; box-shadow: 0 12px 40px #17203355; }
+     .print-dialog::backdrop { background: #17203366; }
+     .print-form { display: grid; gap: 16px; padding: 20px; }
+     .print-form h2 { margin: 0; font-size: 18px; }
+     .print-options { display: grid; gap: 10px; }
+     .print-option { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: center; min-height: 34px; }
+     .print-option input[type="radio"] { min-height: 0; }
+     .print-range-input { grid-column: 2; width: 100%; }
+     .print-hint { margin: -6px 0 0; color: #667188; font-size: 13px; }
+     .print-error { margin: -6px 0 0; color: #a13e3e; font-size: 13px; }
+     .print-error[hidden] { display: none; }
+     .print-actions { display: flex; justify-content: flex-end; gap: 8px; }
+     .print-actions button[type="submit"] { border-color: #2476bd; background: #2476bd; color: #fff; }
+     .export-dialog { width: min(460px, calc(100vw - 32px)); padding: 0; border: 0; border-radius: 10px; background: #fff; color: #172033; box-shadow: 0 12px 40px #17203355; }
+     .export-dialog::backdrop { background: #17203366; }
+     .export-form { display: grid; gap: 14px; padding: 20px; }
+     .export-form h2 { margin: 0; font-size: 18px; }
+      .export-field { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; align-items: center; }
+      .export-field[hidden] { display: none; }
+      .export-field label { color: #49556a; font-size: 14px; }
+     .export-field input, .export-field select { width: 100%; min-height: 34px; padding: 5px 8px; border: 1px solid #c6cedb; border-radius: 5px; background: #fff; color: #172033; font: inherit; }
+     .export-hint { margin: -4px 0 0; color: #667188; font-size: 13px; }
+     .export-error { margin: -4px 0 0; color: #a13e3e; font-size: 13px; }
+     .export-error[hidden] { display: none; }
+     .export-actions { display: flex; justify-content: flex-end; gap: 8px; }
+     .export-actions button[type="submit"] { border-color: #2476bd; background: #2476bd; color: #fff; }
+     .file-button { display: inline-flex; min-height: 30px; align-items: center; justify-content: center; gap: 4px; padding: 4px 8px; border: 1px solid #ffffff38; border-radius: 5px; background: #3b82c4; color: #fff; cursor: pointer; }
+    .file-button:hover { background: #4b95dc; }
+    #cancel-open[hidden] { display: none; }
+    #cancel-action[hidden] { display: none; }
+    #file { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+    button, input { font: inherit; }
+     button { display: inline-flex; min-height: 30px; align-items: center; justify-content: center; gap: 4px; padding: 4px 8px; border: 1px solid #c6cedb; border-radius: 5px; background: #fff; color: #172033; cursor: pointer; }
+     .material-symbols-outlined { font-size: 19px; line-height: 1; font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 20; }
+     .mobile-toolbar-toggle { display: none; }
+    header button { border-color: #ffffff38; background: #263552; color: #fff; }
+    header button:hover:not(:disabled) { background: #34476c; }
+    input { min-height: 34px; padding: 5px 8px; border: 1px solid #c6cedb; border-radius: 5px; background: #fff; color: #172033; }
+    header input { border-color: #ffffff38; }
+    button:disabled, input:disabled { cursor: not-allowed; opacity: .55; }
+    button:focus-visible, input:focus-visible, .file-button:focus-visible { outline: 3px solid #80b4e5; outline-offset: 2px; }
+    .skip-link { position: fixed; top: 8px; left: 8px; z-index: 20; padding: 8px 12px; border-radius: 5px; background: #fff; color: #172033; transform: translateY(-150%); }
+    .skip-link:focus { transform: translateY(0); }
+    #page-number { width: 58px; }
+    #zoom-label { min-width: 48px; color: #d5dceb; text-align: center; }
+    #search { min-width: 130px; flex: 1; }
+    #search-status { color: #49556a; font-size: 13px; white-space: nowrap; }
+    #status { display: flex; min-height: 1.5em; align-items: center; gap: 10px; padding: 8px 18px; background: #eef1f5; color: #49556a; font-size: 13px; }
+    #status-message { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #status-message.copy-feedback { color: #2f7d4a; }
+    #render-progress { width: 120px; height: 8px; accent-color: #2476bd; }
+    #render-progress-label { min-width: 72px; color: #667188; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    #back-to-top { position: fixed; right: 24px; bottom: 24px; z-index: 9; display: inline-flex; min-width: 42px; min-height: 42px; align-items: center; justify-content: center; border: 1px solid #ffffff66; border-radius: 50%; background: #263552e8; color: #fff; box-shadow: 0 3px 12px #17203340; font-size: 20px; line-height: 1; }
+    #back-to-top:hover { background: #34476c; }
+    #back-to-top[hidden] { display: none; }
+    body.dark-reading #render-progress-label { color: #aeb9ca; }
+    body.reading-mode header { box-shadow: none; }
+    body.reading-mode .brand strong { font-size: 0; }
+    body.reading-mode .brand strong::after { font-size: 16px; content: "OFD"; }
+     body.reading-mode #thumbnails { display: none; }
+      body.reading-mode .reader { grid-template-columns: minmax(0, 1fr); max-width: 100%; background: #e0e4e9; }
+     body.reading-mode .reader > #pages,
+     body.hide-thumbnails .reader > #pages { grid-column: 1; }
+     body.hide-thumbnails #thumbnails,
+     #thumbnails[hidden] { display: none !important; }
+      body.hide-thumbnails .reader { grid-template-columns: minmax(0, 1fr); max-width: 100%; background: #e0e4e9; }
+     @media (min-width: 621px) {
+       body.hide-thumbnails .reader { padding-left: 16px; }
+     }
+     body.hide-text-layer .text-layer { display: none; }
+    .page-surface { position: absolute; top: 50%; left: 50%; height: 100%; transform: translate(-50%, -50%); transform-origin: center; }
+    .page-surface.rotated { transform: translate(-50%, -50%) rotate(90deg); }
+    .page-surface.rotated-180 { transform: translate(-50%, -50%) rotate(180deg); }
+    .page-surface.rotated-270 { transform: translate(-50%, -50%) rotate(270deg); }
+    .page-surface > .page-image, .page-surface > .text-layer { position: absolute; inset: 0; }
+     body.dark-reading { background: #1b2029; color: #e6ebf2; }
+     body.dark-reading .reader { background: #1f252f; }
+     body.dark-reading #status { background: #252c38; color: #aeb9ca; }
+    body.dark-reading .thumbnail { border-color: #475365; background: #303947; box-shadow: 0 2px 8px #00000040; }
+    body.dark-reading .thumbnail:hover { border-color: #80b4e5; }
+    body.dark-reading .thumbnail.active { border-color: #80b4e5; box-shadow: inset 0 0 0 2px #80b4e5, 0 3px 10px #00000050; }
+    body.dark-reading .page-card { background: #303947; box-shadow: 0 4px 20px #00000060; }
+    body.dark-reading .search-panel, body.dark-reading .view-panel { border-color: #536074; background: #252c38; color: #e6ebf2; }
+    body.dark-reading .search-panel input { border-color: #536074; background: #303947; color: #e6ebf2; }
+    body.dark-reading .view-option { color: #e6ebf2; }
+    body.dark-reading .recent-panel { border-color: #536074; background: #252c38; color: #e6ebf2; }
+    body.dark-reading .recent-empty { color: #aeb9ca; }
+    body.dark-reading .recent-item { color: #e6ebf2; }
+    body.dark-reading .recent-item:hover { background: #303f55; }
+    body.dark-reading .recent-item small { color: #aeb9ca; }
+    body.dark-reading .recent-header { border-color: #475365; color: #aeb9ca; }
+     body:fullscreen { background: #cfd5de; }
+     body:fullscreen #status { display: none; }
+     body:fullscreen .reader { max-width: 100%; padding: 12px 18px; }
+     body.dark-reading:fullscreen { background: #1b2029; }
+     body.dark-reading:fullscreen .reader { background: #1f252f; }
+
+      .reader { --thumbnail-column: 190px; display: grid; grid-template-columns: var(--thumbnail-column) minmax(0, 1fr); gap: 16px; width: 100%; max-width: none; box-sizing: border-box; margin: 0; padding: 16px 16px 16px 0; background: #e0e4e9; }
+      .reader.hide-thumbnails { grid-template-columns: minmax(0, 1fr); }
+      .reader > #thumbnails { grid-column: 1; }
+      .reader > #pages { grid-column: 2; }
+      .reader.hide-thumbnails > #pages { grid-column: 1; }
+      #thumbnails { position: sticky; top: calc(var(--header-height, 0px) + 16px); display: block; width: 100%; min-width: 0; max-height: calc(100vh - var(--header-height, 0px) - 32px); padding-left: 8px; overflow: auto; scrollbar-width: none; }
+       @supports (height: 100dvh) {
+         #thumbnails { max-height: calc(100dvh - var(--header-height, 0px) - 32px); }
+       }
+       #thumbnails::-webkit-scrollbar { display: none; }
+
+     .double-thumbnail-layout #thumbnails { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+     .double-thumbnail-layout .thumbnail { width: auto; min-height: 138px; }
+     .thumbnail-placeholder { min-height: 138px; border-radius: 6px; background: transparent; }
+      .thumbnail { position: relative; display: grid; place-items: center; width: 100%; min-height: 0; aspect-ratio: 210 / 297; padding: 5px; border: 1px solid #d7dce5; border-radius: 6px; background: #fff; box-shadow: 0 2px 8px #17203318; transition: border-color .15s, box-shadow .15s, transform .15s; }
+    .thumbnail:hover { border-color: #7da7d5; box-shadow: 0 3px 10px #1720332e; }
+    .thumbnail.active { border-color: #2476bd; box-shadow: inset 0 0 0 2px #2476bd, 0 3px 10px #1720332e; }
+    .thumbnail img { display: block; max-width: 100%; max-height: 136px; object-fit: contain; }
+    .thumbnail.loading { overflow: hidden; background: #e8edf3; }
+    .thumbnail.loading::before, .page-card.loading::before { position: absolute; inset: 0; background: linear-gradient(105deg, transparent 30%, #ffffff80 45%, transparent 60%); content: ""; animation: loading-shimmer 1.4s linear infinite; pointer-events: none; }
+    .thumbnail.loading img { opacity: .35; }
+    .thumbnail.loading span { background: #7b8798cc; }
+    .thumbnail span { position: absolute; right: 5px; bottom: 4px; padding: 1px 4px; border-radius: 3px; background: #172033cc; color: #fff; font-size: 12px; }
+      #pages { display: block; position: relative; width: 100%; min-width: 0; overflow-x: auto; touch-action: pan-x pan-y; }
+
+     #pages { padding: 4px 0 24px; }
+      .page-virtual-track, .thumbnail-virtual-track { position: relative; width: 100%; }
+      .page-spread { position: absolute; left: 50%; display: flex; align-items: flex-start; justify-content: center; gap: 18px; transform: translateX(-50%); }
+      .thumbnail-virtual-track .thumbnail { position: absolute; }
+     .page-spread > .page-card, .page-spread .page-placeholder { flex: 0 0 auto; }
+     .page-spread .page-placeholder { min-height: 180px; border-radius: 2px; background: transparent; }
+     .page-card { position: relative; width: 820px; max-width: none; min-height: 180px; overflow: hidden; background: #e8edf3; box-shadow: 0 4px 20px #17203340; }
+    .page-card.loading::after { position: absolute; top: 50%; left: 50%; z-index: 1; padding: 5px 9px; border-radius: 4px; background: #ffffffcc; color: #667188; content: "正在渲染..."; font-size: 13px; transform: translate(-50%, -50%); }
+    .page-card.render-error { display: grid; place-items: center; padding: 24px; background: #f7eaea; }
+    .page-error { display: grid; max-width: 90%; justify-items: center; gap: 8px; color: #9b3e3e; text-align: center; }
+    .page-error strong { font-size: 15px; }
+    .page-error small { max-width: 100%; overflow: hidden; color: #7b5a5a; text-overflow: ellipsis; white-space: nowrap; }
+    .page-error button { min-height: 30px; padding: 4px 10px; border-color: #d69b9b; background: #fff; color: #9b3e3e; }
+    .thumbnail.render-error { border-color: #d69b9b; background: #f7eaea; }
+    .thumbnail-error { color: #9b3e3e; font-size: 11px; }
+    .thumbnail-error[hidden] { display: none; }
+    .page-image { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain; }
+    .text-layer { position: absolute; inset: 0; overflow: hidden; user-select: text; }
+    .text-run { position: absolute; overflow: hidden; color: transparent; font-family: sans-serif; line-height: 1; white-space: pre; }
+    .text-run:hover { background: #2476bd0d; }
+    .text-run::selection { color: transparent; background: #3b82f699; }
+    .search-highlight { position: absolute; box-sizing: border-box; border: 1px solid #e09b00; border-radius: 2px; background: #ffd54dcc; pointer-events: none; }
+    .search-highlight.active { background: #ff8f3dcc; box-shadow: 0 0 0 1px #b95c00; }
+    #empty { grid-column: 1 / -1; display: grid; justify-items: center; gap: 8px; padding: 80px 20px; border: 2px dashed #aeb8c7; border-radius: 10px; background: #e8edf3aa; color: #6a7485; text-align: center; }
+    #empty strong { color: #3f4d62; font-size: 20px; }
+    #empty span { font-size: 14px; }
+    #empty.drag-over { border-color: #2476bd; background: #dcecfb; color: #2476bd; }
+    #empty.drag-over strong { color: #2476bd; }
+    #drop-hint { display: none; }
+    @keyframes loading-shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+    @media (max-width: 620px) {
+      header { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto auto; gap: 7px 6px; align-items: center; padding: calc(8px + env(safe-area-inset-top)) 10px 8px; }
+      header > * { margin: 0; }
+      .brand { grid-column: 1 / -1; min-width: 0; }
+      #document-name { max-width: calc(100vw - 150px); }
+      .toolbar-group { display: flex; min-width: 0; flex-wrap: nowrap; align-items: center; padding: 0 0 3px; border-left: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+      .toolbar-group > * { flex: 0 0 auto; white-space: nowrap; }
+      .file-group, .recent-group, .search-group, .view-group { position: relative; width: auto; overflow: visible; }
+       .file-group { grid-column: 1; justify-content: center; }
+       .recent-group { grid-column: 2; justify-content: center; }
+       .search-group { grid-column: 3; justify-content: flex-end; }
+       .view-group { grid-column: 4; justify-content: center; }
+       .mobile-toolbar-toggle { display: inline-flex; grid-column: 5; justify-content: center; }
+       .toolbar-group.recent-group { position: static; }
+       header .recent-panel { top: calc(100% + 8px); right: 10px; left: 10px; z-index: 20; width: auto; max-height: calc(100vh - 120px); max-height: calc(100dvh - 120px); overflow-y: auto; }
+         .page-group, .zoom-group { display: none; grid-column: 1 / -1; width: 100%; justify-content: flex-start; overflow-x: auto; scrollbar-width: none; }
+         .page-group::-webkit-scrollbar, .zoom-group::-webkit-scrollbar { display: none; }
+         header.mobile-toolbar-expanded .page-group { display: flex; grid-row: 3; }
+         header.mobile-toolbar-expanded .zoom-group { display: flex; grid-row: 4; }
+
+
+      .page-group > span { display: inline-flex; align-items: center; }
+      .view-panel, .recent-panel, .search-panel { position: absolute; top: calc(100% + 8px); right: 0; left: auto; min-width: 0; }
+        .search-panel { position: fixed; top: calc(var(--header-height, 0px) + 8px); right: 10px; left: 10px; max-width: none; transform: none; }
+        .recent-panel, .search-panel { width: auto; }
+
+
+       .view-panel { width: min(240px, calc(100vw - 20px)); }
+         .page-spread { left: 0; justify-content: flex-start; transform: none; }
+        .reader { display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 10px; background: #e0e4e9; }
+
+      #thumbnails { position: relative; display: block; flex: 0 0 auto; width: calc(100% + 20px); max-height: 114px; min-height: 114px; margin: -10px -10px 0; padding: 6px 10px; overflow-x: auto; overflow-y: hidden; overflow-anchor: none; overscroll-behavior: contain; touch-action: pan-x; background: transparent; scrollbar-width: thin; }
+       #thumbnails .thumbnail, #thumbnails .thumbnail-placeholder { flex: 0 0 72px; width: 72px; height: 96px; min-height: 96px; }
+       #thumbnails .thumbnail img { max-width: 100%; max-height: 90px; }
+       body.dark-reading .reader { background: #1f252f; }
+        .page-group button, .zoom-group button, .file-button { min-width: 40px; min-height: 40px; }
+        .page-group, .zoom-group { min-height: 40px; }
+
+      #status { flex-wrap: wrap; padding: 7px 10px; }
+      #status-message { flex: 1 1 100%; }
+      #render-progress { flex: 1 1 auto; width: auto; }
+      #back-to-top { right: 14px; bottom: calc(14px + env(safe-area-inset-bottom)); }
+    }
+     @media (max-width: 380px) {
+       header { gap: 5px; }
+       .page-group, .zoom-group { gap: 4px; }
+        .page-group button, .zoom-group button, .file-button { padding-inline: 6px; }
+       .button-text { display: none; }
+       #page-number { width: 50px; }
+       #back-to-top { min-width: 40px; min-height: 40px; }
+     }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#pages">跳到阅读区</a>
+  <header>
+    <div class="brand">
+      <strong>OFD WASM 阅读器</strong>
+      <span id="document-name">未打开文档</span>
+    </div>
+    <div class="toolbar-group file-group">
+       <label class="file-button" for="file" title="打开文件"><span class="material-symbols-outlined" aria-hidden="true">folder_open</span><span class="button-text">打开</span></label>
+      <input id="file" type="file" accept=".ofd,application/ofd">
+      <button id="cancel-open" type="button" hidden>取消</button>
+    </div>
+    <div class="toolbar-group recent-group" aria-label="最近打开">
+       <button id="recent-toggle" type="button" title="最近打开" aria-label="最近打开" aria-controls="recent-panel" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">history</span></button>
+      <div id="recent-panel" class="recent-panel" hidden>
+        <div class="recent-header"><span>最近打开</span><button id="recent-clear" class="recent-clear" type="button">清空</button></div>
+        <div id="recent-empty" class="recent-empty">暂无最近打开的文件</div>
+        <div id="recent-list"></div>
+      </div>
+    </div>
+    <div class="toolbar-group search-group" aria-label="搜索">
+       <button id="search-toggle" type="button" title="搜索" aria-label="搜索" disabled aria-controls="search-panel" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">search</span></button>
+      <div id="search-panel" class="search-panel" hidden>
+        <input id="search" type="search" placeholder="搜索文字" disabled>
+         <button id="search-button" type="button" title="查找" aria-label="查找" disabled><span class="material-symbols-outlined" aria-hidden="true">search</span></button>
+         <button id="search-previous" type="button" title="上一个搜索结果" disabled aria-label="上一个搜索结果"><span class="material-symbols-outlined" aria-hidden="true">arrow_upward</span></button>
+         <button id="search-next" type="button" title="下一个搜索结果" disabled aria-label="下一个搜索结果"><span class="material-symbols-outlined" aria-hidden="true">arrow_downward</span></button>
+        <span id="search-status" aria-live="polite"></span>
+      </div>
+    </div>
+    <div class="toolbar-group view-group" aria-label="显示设置">
+       <button id="view-toggle" type="button" title="显示设置" aria-label="显示设置" disabled aria-controls="view-panel" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">tune</span></button>
+      <div id="view-panel" class="view-panel" hidden>
+         <label class="view-option"><input id="show-thumbnails" type="checkbox" checked>显示缩略图</label>
+         <label class="view-option"><input id="show-text-layer" type="checkbox" checked>显示文字层</label>
+         <label class="view-option"><input id="dark-reading" type="checkbox">深色阅读背景</label>
+         <label class="view-option">页面布局<select id="page-layout" aria-label="页面布局">
+           <option value="single">单页</option>
+           <option value="double">双页</option>
+           <option value="double-odd-left">双页，奇数页在左</option>
+         </select></label>
+      </div>
+    </div>
+    <div class="toolbar-group mobile-toolbar-toggle">
+      <button id="mobile-toolbar-toggle" type="button" title="展开工具栏" aria-label="展开工具栏" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">expand_more</span></button>
+    </div>
+    <div class="toolbar-group page-group" aria-label="页面导航">
+       <button id="previous" type="button" title="上一页" aria-label="上一页" disabled><span class="material-symbols-outlined" aria-hidden="true">chevron_left</span></button>
+      <span><input id="page-number" type="number" min="1" value="1" size="3" disabled> / <span id="page-count">0</span></span>
+       <button id="next" type="button" title="下一页" aria-label="下一页" disabled><span class="material-symbols-outlined" aria-hidden="true">chevron_right</span></button>
+       <button id="print-page" type="button" title="打印" aria-label="打印" disabled><span class="material-symbols-outlined" aria-hidden="true">print</span></button>
+       <button id="export-document" type="button" title="导出" aria-label="导出" disabled><span class="material-symbols-outlined" aria-hidden="true">download</span></button>
+       <button id="copy-page-text" type="button" title="复制当前页文字" aria-label="复制当前页文字" disabled><span class="material-symbols-outlined" aria-hidden="true">content_copy</span></button>
+       <button id="copy-all-text" type="button" title="复制全文" aria-label="复制全文" disabled><span class="material-symbols-outlined" aria-hidden="true">text_snippet</span></button>
+    </div>
+    <div class="toolbar-group zoom-group" aria-label="缩放">
+       <button id="zoom-out" type="button" title="缩小" aria-label="缩小" disabled><span class="material-symbols-outlined" aria-hidden="true">remove</span></button>
+      <span id="zoom-label">100%</span>
+       <button id="zoom-in" type="button" title="放大" aria-label="放大" disabled><span class="material-symbols-outlined" aria-hidden="true">add</span></button>
+       <button id="zoom-fit" type="button" title="适应宽度" aria-label="适应宽度" disabled><span class="material-symbols-outlined" aria-hidden="true">width</span></button>
+       <button id="zoom-fit-page" type="button" title="适应页面" aria-label="适应页面" disabled><span class="material-symbols-outlined" aria-hidden="true">fit_screen</span></button>
+       <button id="rotate-page" type="button" title="旋转 0°" aria-label="旋转 0°" disabled><span class="material-symbols-outlined" aria-hidden="true">rotate_right</span></button>
+       <button id="reading-mode" type="button" title="阅读模式" aria-label="阅读模式" disabled aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span></button>
+    </div>
+  </header>
+  <div id="status">
+    <span id="status-message">正在加载 WASM Worker...</span>
+    <progress id="render-progress" max="1" value="0" hidden></progress>
+    <span id="render-progress-label" hidden></span>
+    <button id="cancel-action" type="button" hidden>取消操作</button>
+  </div>
+  <dialog id="print-dialog" class="print-dialog" aria-labelledby="print-title">
+    <form id="print-form" class="print-form">
+      <h2 id="print-title">打印范围</h2>
+      <div class="print-options">
+        <label class="print-option"><input type="radio" name="print-range" value="current" checked><span id="print-current-label">当前页</span></label>
+        <label class="print-option"><input type="radio" name="print-range" value="all"><span>全部页面</span></label>
+        <label class="print-option"><input type="radio" name="print-range" value="custom"><span>自定义范围</span></label>
+        <input id="print-range-custom" class="print-range-input" type="text" inputmode="numeric" placeholder="例如：1-3,5,8-10" aria-label="自定义打印范围" disabled>
+      </div>
+      <p class="print-hint">可使用逗号分隔页面，页码从 1 开始。</p>
+      <p id="print-error" class="print-error" role="alert" hidden></p>
+      <div class="print-actions">
+        <button id="print-cancel" type="button">取消</button>
+        <button type="submit">开始打印</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="export-dialog" class="export-dialog" aria-labelledby="export-title">
+    <form id="export-form" class="export-form">
+      <h2 id="export-title">导出文档</h2>
+      <div class="export-field">
+        <label for="export-range">导出范围</label>
+        <select id="export-range">
+          <option value="current">当前页</option>
+          <option value="all">全部页面</option>
+          <option value="custom">自定义范围</option>
+        </select>
+      </div>
+      <div class="export-field">
+        <label for="export-custom-range">页码</label>
+        <input id="export-custom-range" type="text" inputmode="numeric" placeholder="例如：1-3,5" disabled>
+      </div>
+      <div class="export-field" id="export-dpi-field" hidden>
+        <label for="export-dpi">DPI</label>
+        <input id="export-dpi" type="number" min="1" max="1200" step="1" value="150">
+      </div>
+      <div class="export-field">
+        <label for="export-format">格式</label>
+        <select id="export-format">
+          <option value="png">PNG 图片</option>
+          <option value="jpg">JPG 图片</option>
+          <option value="pdf">PDF 文档</option>
+          <option value="txt">TXT 文字</option>
+        </select>
+      </div>
+      <div class="export-field" id="export-background-field">
+        <label for="export-background">背景颜色</label>
+        <select id="export-background">
+          <option value="transparent">透明（JPG 使用白色）</option>
+          <option value="white">白色</option>
+          <option value="black">黑色</option>
+        </select>
+      </div>
+      <p class="export-hint">多页图片将导出为 ZIP；PDF 按所选 DPI 栅格化并保持页面物理尺寸；JPG 不支持透明色，选择透明时使用白色背景；TXT 导出不使用 DPI 和背景颜色。</p>
+      <p id="export-error" class="export-error" role="alert" hidden></p>
+      <div class="export-actions">
+        <button id="export-cancel" type="button">取消</button>
+        <button type="submit">开始导出</button>
+      </div>
+    </form>
+  </dialog>
+  <div class="reader">
+    <aside id="thumbnails" aria-label="页面缩略图"></aside>
+    <main id="pages" tabindex="-1">
+      <div id="empty">
+        <strong>打开 OFD 文档</strong>
+        <span>点击上方“打开文件”，或将 OFD 文件拖到这里</span>
+        <span id="drop-hint">松开鼠标即可打开</span>
+      </div>
+    </main>
+  </div>
+   <button id="back-to-top" type="button" hidden aria-label="返回顶部" title="返回顶部"><span class="material-symbols-outlined" aria-hidden="true">arrow_upward</span></button>
+  <script src="viewer.js?v=aeaf8820bc2b51d3"></script>
+</body>
+</html>
