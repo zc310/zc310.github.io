@@ -614,6 +614,9 @@ function mountPageSpread(position) {
     surface.className = 'page-surface';
     const textLayer = document.createElement('div');
     textLayer.className = 'text-layer';
+    image.addEventListener('load', () => {
+      clearPageLoading(card, image);
+    });
     surface.append(image, textLayer);
     card.append(surface);
     element.append(card);
@@ -693,6 +696,10 @@ function updatePageVirtualWindow(updateCurrent = true) {
     const visible = spread.offset + spread.height >= viewTop && spread.offset <= viewBottom;
     if (visible) mountPageSpread(position);
     else unmountPageSpread(position);
+  });
+  pageCards.forEach(card => {
+    if (!card) return;
+    clearPageLoading(card, card.querySelector('.page-image'));
   });
   if (!updateCurrent) return;
   const visible = pageSpreads
@@ -1537,6 +1544,14 @@ function buildTextLayer(index) {
   if (!layer.parentElement) card.append(layer);
 }
 
+function pageImageIsReady(image) {
+  return image && !image.hidden && image.complete && image.naturalWidth > 0;
+}
+
+function clearPageLoading(card, image) {
+  if (pageImageIsReady(image)) card.classList.remove('loading');
+}
+
 function loadText(index, pinned = false) {
   const card = pageCards[index];
   if (textCache.has(index)) {
@@ -1678,14 +1693,16 @@ function loadPage(index) {
   const card = ensurePageMounted(index);
   if (!card) return;
   const generation = documentGeneration;
+  const image = card.querySelector('.page-image');
   const token = String(++pageLoadToken);
   card.dataset.loadToken = token;
   card.classList.remove('render-error');
   card.querySelector('.page-error')?.remove();
   card.classList.add('loading');
+  clearPageLoading(card, image);
   const isCurrentCardRequest = () =>
     generation === documentGeneration && pageCards[index] === card && card.dataset.loadToken === token;
-  return loadImage(index, 'page', generation, card.querySelector('img'), card)
+  return loadImage(index, 'page', generation, image, card)
     .then(url => {
       // 图片请求完成后立即移除遮罩，不等待文字层请求完成。
       if (url && isCurrentCardRequest()) card.classList.remove('loading');
@@ -1705,6 +1722,7 @@ function loadPage(index) {
       // 无论图片请求成功、失败、取消还是因缩放过期返回 null，
       // 当前卡片都不能遗留“正在渲染...”遮罩。
       if (isCurrentCardRequest()) card.classList.remove('loading');
+      if (isCurrentCardRequest()) clearPageLoading(card, image);
     });
 }
 
