@@ -1,7 +1,7 @@
 // CACHE_NAME 由 make build-wasm / make package-wasm-web 根据
 // index.html、viewer.js、worker.js、wasm_exec.js、ofd.wasm 的内容哈希生成
 // ofd-reader-shell_<hash>；资源路径保持固定，发布时重新构建即可。
-const CACHE_NAME = 'ofd-reader-shell_8fc83488e544db90';
+const CACHE_NAME = 'ofd-reader-shell_462d6fc5477b953e';
 const SHELL_FILES = [
   './',
   './index.html',
