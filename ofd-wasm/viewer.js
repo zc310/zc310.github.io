@@ -3111,9 +3111,7 @@ function setRenderFormat(value) {
   } catch (_) {}
   if (!changed || !pageInfos.length) return;
   cancelRequests(pageRequests);
-  cancelRequests(thumbnailRequests);
   pageCache.clear();
-  thumbnailCache.clear();
   resetRenderProgress();
   pageCards.forEach(card => {
     card.classList.add('loading');
@@ -3121,20 +3119,12 @@ function setRenderFormat(value) {
     image.hidden = true;
     image.removeAttribute('src');
   });
-  thumbnailButtons.forEach(button => {
-    const image = button?.querySelector('img');
-    if (image) {
-      image.hidden = true;
-      image.removeAttribute('src');
-    }
-  });
   pageCards.forEach((card, index) => {
     if (!card) return;
     const bounds = card.getBoundingClientRect();
     if (bounds.top < window.innerHeight + 800 && bounds.bottom > -800) loadPage(index);
   });
   scheduleVirtualUpdate();
-  scheduleThumbnailVirtualUpdate();
 }
 
 function setClarityPriority(enabled) {
