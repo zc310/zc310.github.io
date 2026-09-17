@@ -10,7 +10,7 @@
   "theme_color": "#172033",
   "file_handlers": [
     {
-      "action": "https://zc310.github.io/ofd-wasm/",
+      "action": "./",
       "accept": {
         "application/ofd": [".ofd"]
       }
