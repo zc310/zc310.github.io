@@ -117,6 +117,62 @@ class OFDWorkerClient {
     return this.request('info');
   }
 
+  outline() {
+    return this.request('outline');
+  }
+
+  preferences() {
+    return this.request('preferences');
+  }
+
+  fontUsage(scope, fontID, options = {}) {
+    return this.request('fontUsage', { scope, fontID, maxScan: options.maxScan, maxPages: options.maxPages });
+  }
+
+  fontUsageAll(options = {}) {
+    return this.request('fontUsageAll', { maxScan: options.maxScan, maxPages: options.maxPages });
+  }
+
+  attachments() {
+    return this.request('attachments');
+  }
+
+  attachmentData(scope, attachmentID, maxBytes) {
+    return this.request('attachmentData', { scope, attachmentID, maxBytes });
+  }
+
+  media() {
+    return this.request('media');
+  }
+
+  mediaData(scope, mediaID, maxBytes) {
+    return this.request('mediaData', { scope, mediaID, maxBytes });
+  }
+
+  annotations() {
+    return this.request('annotations');
+  }
+
+  signatures() {
+    return this.request('signatures');
+  }
+
+  signatureSeal(scope, signatureID, stampIndex) {
+    return this.request('signatureSeal', { scope, signatureID, stampIndex });
+  }
+
+  signatureCertificate(scope, signatureID, slot) {
+    return this.request('signatureCertificate', { scope, signatureID, slot });
+  }
+
+  signatureValue(scope, signatureID) {
+    return this.request('signatureValue', { scope, signatureID });
+  }
+
+  stats() {
+    return this.request('stats');
+  }
+
   memStats() {
     return this.request('memStats');
   }
@@ -268,8 +324,10 @@ const empty = document.querySelector('#empty');
 const dropHint = document.querySelector('#drop-hint');
 const pageNumber = document.querySelector('#page-number');
 const pageCount = document.querySelector('#page-count');
-const previous = document.querySelector('#previous');
-const next = document.querySelector('#next');
+const previous = document.querySelector('#pill-previous');
+const next = document.querySelector('#pill-next');
+const documentMenuToggle = document.querySelector('#document-menu-toggle');
+const documentMenu = document.querySelector('#document-menu');
 const printPage = document.querySelector('#print-page');
 const exportDocument = document.querySelector('#export-document');
 const exportDialog = document.querySelector('#export-dialog');
@@ -292,8 +350,8 @@ const copyPageText = document.querySelector('#copy-page-text');
 const copyAllTextButton = document.querySelector('#copy-all-text');
 const zoomOut = document.querySelector('#zoom-out');
 const zoomIn = document.querySelector('#zoom-in');
-const zoomFit = document.querySelector('#zoom-fit');
-const zoomFitPage = document.querySelector('#zoom-fit-page');
+const zoomMenuToggle = document.querySelector('#zoom-menu-toggle');
+const zoomMenu = document.querySelector('#zoom-menu');
 const rotatePageButton = document.querySelector('#rotate-page');
 const readingMode = document.querySelector('#reading-mode');
 const zoomLabel = document.querySelector('#zoom-label');
@@ -309,6 +367,9 @@ const viewToggle = document.querySelector('#view-toggle');
 const viewPanel = document.querySelector('#view-panel');
 const showThumbnails = document.querySelector('#show-thumbnails');
 const showTextLayer = document.querySelector('#show-text-layer');
+const showPagePill = document.querySelector('#show-page-pill');
+const pagePill = document.querySelector('#page-pill');
+const pillHide = document.querySelector('#pill-hide');
 const darkReading = document.querySelector('#dark-reading');
 const clarityPrioritySelect = document.querySelector('#clarity-priority');
 const renderFormatSelect = document.querySelector('#render-format');
@@ -323,6 +384,33 @@ const infoToggle = document.querySelector('#info-toggle');
 const infoPanel = document.querySelector('#info-panel');
 const infoClose = document.querySelector('#info-close');
 const infoBody = document.querySelector('#info-body');
+const sidebarElement = document.querySelector('#sidebar');
+const sidebarTabsElement = document.querySelector('#sidebar-tabs');
+const sidebarFilter = document.querySelector('#sidebar-filter');
+const sidebarResizer = document.querySelector('#sidebar-resizer');
+const sidebarTabThumbnails = document.querySelector('#sidebar-tab-thumbnails');
+const sidebarTabOutline = document.querySelector('#sidebar-tab-outline');
+const sidebarTabBookmarks = document.querySelector('#sidebar-tab-bookmarks');
+const sidebarTabMore = document.querySelector('#sidebar-tab-more');
+const sidebarTabMoreLabel = document.querySelector('#sidebar-tab-more-label');
+const sidebarMoreMenu = document.querySelector('#sidebar-more-menu');
+const sidebarMoreFonts = document.querySelector('#sidebar-more-fonts');
+const sidebarMoreAttachments = document.querySelector('#sidebar-more-attachments');
+const sidebarMoreMedia = document.querySelector('#sidebar-more-media');
+const sidebarMoreAnnotations = document.querySelector('#sidebar-more-annotations');
+const sidebarMoreSignatures = document.querySelector('#sidebar-more-signatures');
+const attachmentsElement = document.querySelector('#attachments');
+const mediaElement = document.querySelector('#media');
+const annotationsElement = document.querySelector('#annotations');
+const signaturesElement = document.querySelector('#signatures');
+const thumbnailToolbar = document.querySelector('#thumbnail-toolbar');
+const thumbnailSizeSlider = document.querySelector('#thumbnail-size-slider');
+const outlineElement = document.querySelector('#outline');
+const bookmarksElement = document.querySelector('#bookmarks');
+const fontsElement = document.querySelector('#fonts');
+const outlineToolbar = document.querySelector('#outline-toolbar');
+const outlineExpandAll = document.querySelector('#outline-expand-all');
+const outlineCollapseAll = document.querySelector('#outline-collapse-all');
 const engine = new OFDWorkerClient();
 const pageCache = new BlobURLCache(128 << 20, url =>
   Array.from(document.querySelectorAll('.page-image')).some(image => !image.hidden && image.src === url));
@@ -412,6 +500,55 @@ let thumbnailsVisible = (() => {
     return true;
   }
 })();
+const sidebarTabStorageKey = 'ofd-sidebar-tab';
+let activeSidebarTab = (() => {
+  try {
+    const value = localStorage.getItem(sidebarTabStorageKey);
+    return ['thumbnails', 'outline', 'bookmarks', 'fonts'].includes(value) ? value : 'thumbnails';
+  } catch (_) {
+    return 'thumbnails';
+  }
+})();
+let outlineNodes = [];
+let bookmarkNodes = [];
+let sidebarFilterValue = '';
+const thumbnailSizeStorageKey = 'ofd-thumbnail-size';
+// 缩略图尺寸以可用宽度的百分比表示，允许 40%–100%。兼容旧版 small/medium/large 档位。
+const thumbnailSizeLegacy = { small: 55, medium: 75, large: 100 };
+let thumbnailSizePercent = (() => {
+  try {
+    const raw = localStorage.getItem(thumbnailSizeStorageKey);
+    if (raw == null) return 100;
+    const value = Object.prototype.hasOwnProperty.call(thumbnailSizeLegacy, raw) ? thumbnailSizeLegacy[raw] : Number(raw);
+    return Number.isFinite(value) ? Math.max(40, Math.min(100, Math.round(value))) : 100;
+  } catch (_) {
+    return 100;
+  }
+})();
+const outlineExpandStorageKey = 'ofd-outline-expanded';
+let outlineExpandState = {};
+let documentInfo = null;
+let documentInfoGeneration = -1;
+let documentFontUsage = null;
+let documentFontUsageGeneration = -1;
+let documentFontUsageMeta = { scanned: 0, truncated: false };
+let mediaObserver = null;
+let mediaObjectURLs = [];
+const sidebarScrollStorageKey = 'ofd-sidebar-scroll';
+let sidebarScroll = {};
+let sidebarScrollPersistTimer;
+const sidebarScrollPanels = {};
+const sidebarWidthStorageKey = 'ofd-sidebar-width';
+let sidebarWidth = (() => {
+  try {
+    const stored = localStorage.getItem(sidebarWidthStorageKey);
+    if (stored == null) return 210;
+    const value = Number(stored);
+    return Number.isFinite(value) ? Math.max(140, Math.min(520, value)) : 210;
+  } catch (_) {
+    return 210;
+  }
+})();
 let renderFormat = (() => {
   try {
     const value = localStorage.getItem(renderFormatStorageKey);
@@ -428,6 +565,14 @@ let clarityPriority = (() => {
   }
 })();
 let textLayerVisible = true;
+const pagePillStorageKey = 'ofd-show-page-pill';
+let pagePillVisible = (() => {
+  try {
+    return localStorage.getItem(pagePillStorageKey) !== 'false';
+  } catch (_) {
+    return true;
+  }
+})();
 let darkReadingVisible = false;
 const documentBackgroundModeStorageKey = 'ofd-document-background-mode';
 const documentBackgroundColorStorageKey = 'ofd-document-background-color';
@@ -807,9 +952,8 @@ function updateThumbnailMetrics() {
   const double = pageLayoutIsDouble();
   const columns = mobile ? 1 : double ? 2 : 1;
   const gap = mobile ? 8 : double ? 8 : 10;
-  const itemWidth = mobile
-    ? 72
-    : Math.max(1, (thumbnailVirtualTrack.clientWidth - gap * (columns - 1)) / columns);
+  const available = Math.max(1, (thumbnailVirtualTrack.clientWidth - gap * (columns - 1)) / columns);
+  const itemWidth = mobile ? 72 : Math.max(1, available * (thumbnailSizePercent / 100));
   const rows = Math.ceil(thumbnailSlots.length / columns);
   const rowHeights = Array.from({ length: rows }, (_, row) => {
     const start = row * columns;
@@ -1102,9 +1246,7 @@ function resizeThumbnail(index, thumbnail) {
   const slot = thumbnailSlotForPage(index);
   if (slot < 0) return;
   const { mobile, columns, gap, itemWidth, rowOffsets, maxHeight } = thumbnailMetrics;
-  const width = mobile
-    ? itemWidth
-    : (thumbnailVirtualTrack.clientWidth - gap * (columns - 1)) / columns;
+  const width = itemWidth;
   const height = thumbnailHeight(index, width);
   if (mobile) {
     thumbnail.style.left = `${slot * (itemWidth + gap)}px`;
@@ -1716,8 +1858,8 @@ function updateNavigation() {
   searchNext.disabled = searchResults.length === 0;
   zoomOut.disabled = pageInfos.length === 0;
   zoomIn.disabled = pageInfos.length === 0;
-  zoomFit.disabled = pageInfos.length === 0;
-  zoomFitPage.disabled = pageInfos.length === 0;
+  zoomMenuToggle.disabled = pageInfos.length === 0;
+  documentMenuToggle.disabled = pageInfos.length === 0;
   rotatePageButton.disabled = pageInfos.length === 0;
   readingMode.disabled = pageInfos.length === 0;
   viewToggle.disabled = pageInfos.length === 0;
@@ -1726,6 +1868,7 @@ function updateNavigation() {
   renderFormatSelect.disabled = documentActionBusy || pageInfos.length === 0;
   clarityPrioritySelect.disabled = documentActionBusy || pageInfos.length === 0 || !imageRenderFormat();
   zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+  pagePill.hidden = !pagePillVisible || pageInfos.length === 0;
 }
 
 function setDocumentActionBusy(busy) {
@@ -1814,6 +1957,7 @@ function setCurrent(index, syncThumbnail = true) {
     if (active) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
+  if (changed) updateOutlineActive();
   if (zoomMode === 'page') fitPageZoom();
   updateNavigation();
 }
@@ -2462,8 +2606,8 @@ function flushThumbnailBatch() {
 
 function buildPages() {
   updateThumbnailLayout();
-  thumbnailsElement.hidden = !thumbnailsVisible;
   readerElement.classList.toggle('hide-thumbnails', !thumbnailsVisible);
+  applySidebarPanels();
   resizeObserver?.disconnect();
   pagesElement.replaceChildren();
   thumbnailsElement.replaceChildren();
@@ -2597,6 +2741,24 @@ async function openSelectedFile(selected) {
   thumbnailAnchor = 0;
   thumbnailVirtualTranslate = 0;
   thumbnailsElement.style.paddingBottom = '';
+  resetSidebarFilter();
+  outlineNodes = [];
+  bookmarkNodes = [];
+  renderOutline();
+  renderBookmarks();
+  documentInfo = null;
+  documentInfoGeneration = -1;
+  documentFontUsage = null;
+  documentFontUsageGeneration = -1;
+  documentFontUsageMeta = { scanned: 0, truncated: false };
+  outlineExpandState = {};
+  sidebarScroll = {};
+  if (activeSidebarTab === 'fonts') fontsElement?.replaceChildren();
+  if (activeSidebarTab === 'attachments') attachmentsElement?.replaceChildren();
+  revokeMediaURLs();
+  if (activeSidebarTab === 'media') mediaElement?.replaceChildren();
+  if (activeSidebarTab === 'annotations') annotationsElement?.replaceChildren();
+  if (activeSidebarTab === 'signatures') signaturesElement?.replaceChildren();
   documentName.textContent = selected.name;
   documentName.title = selected.name;
   setStatus(`正在打开 ${selected.name}...`);
@@ -2640,11 +2802,20 @@ async function openSelectedFile(selected) {
         : { index, width: 210, height: 297 };
     });
     currentDocumentKey = documentKey(selected);
+    sidebarScroll = readSidebarScroll();
     current = restoreReadingPosition(selected, pageInfos.length);
+    await applyDocumentPreferences();
+    if (generation !== documentGeneration) return;
     restorePageRotation();
     buildPages();
+    if (activeSidebarTab === 'fonts') renderFonts();
+    if (activeSidebarTab === 'attachments') renderAttachments();
+    if (activeSidebarTab === 'media') renderMedia();
+    if (activeSidebarTab === 'annotations') renderAnnotations();
+    if (activeSidebarTab === 'signatures') renderSignatures();
     setStatus(`已打开：${selected.name}`);
     updateRenderProgress();
+    void loadOutline();
     void saveRecentFile(selected);
     void reportMemory('打开文档');
   } catch (error) {
@@ -2660,6 +2831,22 @@ async function openSelectedFile(selected) {
     thumbnailVirtualWindow = undefined;
     thumbnailAnchor = 0;
     thumbnailVirtualTranslate = 0;
+    resetSidebarFilter();
+    outlineNodes = [];
+    bookmarkNodes = [];
+    renderOutline();
+    renderBookmarks();
+    documentInfo = null;
+    documentInfoGeneration = -1;
+    documentFontUsage = null;
+    documentFontUsageGeneration = -1;
+    documentFontUsageMeta = { scanned: 0, truncated: false };
+    outlineExpandState = {};
+    if (activeSidebarTab === 'fonts') renderFonts();
+    if (activeSidebarTab === 'attachments') renderAttachments();
+    if (activeSidebarTab === 'media') renderMedia();
+    if (activeSidebarTab === 'annotations') renderAnnotations();
+    if (activeSidebarTab === 'signatures') renderSignatures();
     pagesElement.replaceChildren();
     thumbnailsElement.replaceChildren();
     pagesElement.append(empty);
@@ -2713,6 +2900,22 @@ function cancelOpening() {
   thumbnailVirtualWindow = undefined;
   thumbnailAnchor = 0;
   thumbnailVirtualTranslate = 0;
+  resetSidebarFilter();
+  outlineNodes = [];
+  bookmarkNodes = [];
+  renderOutline();
+  renderBookmarks();
+  documentInfo = null;
+  documentInfoGeneration = -1;
+  documentFontUsage = null;
+  documentFontUsageGeneration = -1;
+  documentFontUsageMeta = { scanned: 0, truncated: false };
+  outlineExpandState = {};
+  if (activeSidebarTab === 'fonts') renderFonts();
+  if (activeSidebarTab === 'attachments') renderAttachments();
+  if (activeSidebarTab === 'media') renderMedia();
+  if (activeSidebarTab === 'annotations') renderAnnotations();
+  if (activeSidebarTab === 'signatures') renderSignatures();
   thumbnailSlots = [];
   thumbnailSlotByPage = [];
   currentDocumentKey = '';
@@ -2864,8 +3067,8 @@ function updateDocumentInfo() {
     return;
   }
   const generation = documentGeneration;
-  engine.info().then(info => {
-    if (generation !== documentGeneration) return;
+  loadDocumentInfo().then(info => {
+    if (generation !== documentGeneration || !info) return;
     const rows = [];
     if (info.docID) rows.push(['文档标识', info.docID]);
     if (info.title) rows.push(['标题', info.title]);
@@ -2877,13 +3080,50 @@ function updateDocumentInfo() {
     if (info.creator) rows.push(['创建软件', info.creator]);
     if (info.version) rows.push(['OFD 版本', info.version]);
     rows.push(['页数', String(pageInfos.length)]);
-    if (rows.length === 0) {
-      infoBody.innerHTML = '<p class="info-empty">无文档信息</p>';
-      return;
-    }
-    infoBody.innerHTML = rows.map(([label, value]) =>
+    const fonts = Array.isArray(info.fonts) ? info.fonts : [];
+    let html = rows.map(([label, value]) =>
       `<div class="info-row"><span class="info-label">${label}</span><span class="info-value">${escapeHTML(value)}</span></div>`
     ).join('');
+    html += '<div class="info-section-title">字体</div>';
+    if (!fonts.length) {
+      html += '<p class="info-empty">文档未声明字体</p>';
+    } else {
+      html += fonts.map(font => {
+        const badges = [font.embedded ? '嵌入' : '逻辑'];
+        if (font.bold) badges.push('粗体');
+        if (font.italic) badges.push('斜体');
+        if (font.serif) badges.push('衬线');
+        if (font.fixed_width) badges.push('等宽');
+        if (font.format) badges.push(String(font.format).toUpperCase());
+        const name = font.name || font.family || `字体 ${font.id}`;
+        const family = font.family && font.family !== font.name
+          ? `<span class="font-family">${escapeHTML(font.family)}</span>` : '';
+        return `<div class="font-item"><span class="font-name">${escapeHTML(name)}</span>${family}` +
+          `<span class="font-badges">${badges.map(badge => `<span class="font-badge">${escapeHTML(badge)}</span>`).join('')}</span></div>`;
+      }).join('');
+    }
+    infoBody.innerHTML = html;
+    engine.stats().then(stats => {
+      if (generation !== documentGeneration || !stats) return;
+      const title = document.createElement('div');
+      title.className = 'info-section-title';
+      title.textContent = '资源统计';
+      const box = document.createElement('div');
+      [['字体', stats.fonts], ['附件', stats.attachments], ['多媒体', stats.media], ['注解页', stats.annotation_pages], ['签名', stats.signatures]]
+        .forEach(([label, value]) => {
+          const row = document.createElement('div');
+          row.className = 'info-row';
+          const name = document.createElement('span');
+          name.className = 'info-label';
+          name.textContent = label;
+          const count = document.createElement('span');
+          count.className = 'info-value';
+          count.textContent = String(value ?? 0);
+          row.append(name, count);
+          box.append(row);
+        });
+      infoBody.append(title, box);
+    }).catch(() => {});
   }).catch(() => {
     if (generation !== documentGeneration) return;
     infoBody.innerHTML = '<p class="info-empty">获取信息失败</p>';
@@ -3432,6 +3672,8 @@ function setSearchPanelOpen(open) {
   if (open) {
     setRecentPanelOpen(false);
     setViewPanelOpen(false);
+    setZoomMenuOpen(false);
+    setDocumentMenuOpen(false);
     searchInput.focus();
   }
 }
@@ -3455,6 +3697,32 @@ function setViewPanelOpen(open) {
   if (open) {
     setRecentPanelOpen(false);
     setSearchPanelOpen(false);
+    setZoomMenuOpen(false);
+    setDocumentMenuOpen(false);
+  }
+}
+
+function setZoomMenuOpen(open) {
+  if (!zoomMenu || !zoomMenuToggle) return;
+  zoomMenu.hidden = !open;
+  zoomMenuToggle.setAttribute('aria-expanded', String(open));
+  if (open) {
+    setRecentPanelOpen(false);
+    setSearchPanelOpen(false);
+    setViewPanelOpen(false);
+    setDocumentMenuOpen(false);
+  }
+}
+
+function setDocumentMenuOpen(open) {
+  if (!documentMenu || !documentMenuToggle) return;
+  documentMenu.hidden = !open;
+  documentMenuToggle.setAttribute('aria-expanded', String(open));
+  if (open) {
+    setRecentPanelOpen(false);
+    setSearchPanelOpen(false);
+    setViewPanelOpen(false);
+    setZoomMenuOpen(false);
   }
 }
 
@@ -3476,10 +3744,198 @@ function setMobileToolbarExpanded(expanded) {
   }
 }
 
+function readSidebarScroll() {
+  try {
+    const all = JSON.parse(localStorage.getItem(sidebarScrollStorageKey) || '{}');
+    const state = currentDocumentKey ? all[currentDocumentKey] : null;
+    return state && typeof state === 'object' ? state : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function persistSidebarScroll() {
+  clearTimeout(sidebarScrollPersistTimer);
+  sidebarScrollPersistTimer = setTimeout(() => {
+    if (!currentDocumentKey) return;
+    try {
+      const all = JSON.parse(localStorage.getItem(sidebarScrollStorageKey) || '{}');
+      all[currentDocumentKey] = sidebarScroll;
+      const entries = Object.entries(all).slice(-20);
+      localStorage.setItem(sidebarScrollStorageKey, JSON.stringify(Object.fromEntries(entries)));
+    } catch (_) {}
+  }, 300);
+}
+
+function restorePanelScroll(panel) {
+  const element = sidebarScrollPanels[panel];
+  if (element) element.scrollTop = sidebarScroll[panel] || 0;
+}
+
+const sidebarTabs = ['thumbnails', 'outline', 'bookmarks', 'fonts', 'attachments', 'media', 'annotations', 'signatures'];
+const sidebarMoreTabs = ['fonts', 'attachments', 'media', 'annotations', 'signatures'];
+const sidebarMoreLabels = { fonts: '字体', attachments: '附件', media: '资源', annotations: '注解', signatures: '签名' };
+
+// applySidebarPanels 根据侧栏可见性和当前面板，决定缩略图/大纲/书签/字体/附件面板的显隐。
+function applySidebarPanels() {
+  if (!sidebarElement) return;
+  if (!sidebarTabs.includes(activeSidebarTab)) activeSidebarTab = 'thumbnails';
+  sidebarElement.hidden = !thumbnailsVisible;
+  const active = tab => thumbnailsVisible && activeSidebarTab === tab;
+  thumbnailsElement.hidden = !active('thumbnails');
+  if (outlineElement) outlineElement.hidden = !active('outline');
+  if (bookmarksElement) bookmarksElement.hidden = !active('bookmarks');
+  if (fontsElement) fontsElement.hidden = !active('fonts');
+  if (attachmentsElement) attachmentsElement.hidden = !active('attachments');
+  if (mediaElement) mediaElement.hidden = !active('media');
+  if (annotationsElement) annotationsElement.hidden = !active('annotations');
+  if (signaturesElement) signaturesElement.hidden = !active('signatures');
+  if (thumbnailToolbar) thumbnailToolbar.hidden = !active('thumbnails');
+  if (outlineToolbar) outlineToolbar.hidden = !active('outline');
+  if (outlineExpandAll) outlineExpandAll.disabled = Boolean(sidebarFilterValue);
+  if (outlineCollapseAll) outlineCollapseAll.disabled = Boolean(sidebarFilterValue);
+  if (sidebarFilter) {
+    const filterable = active('outline') || active('bookmarks') || active('fonts') || active('attachments') || active('media') || active('annotations') || active('signatures');
+    sidebarFilter.hidden = !filterable;
+    if (active('fonts')) sidebarFilter.placeholder = '过滤字体';
+    else if (active('attachments')) sidebarFilter.placeholder = '过滤附件';
+    else if (active('media')) sidebarFilter.placeholder = '过滤资源';
+    else if (active('annotations')) sidebarFilter.placeholder = '过滤注解';
+    else if (active('signatures')) sidebarFilter.placeholder = '过滤签名';
+    else sidebarFilter.placeholder = '过滤标题';
+  }
+  const tabs = [
+    [sidebarTabThumbnails, 'thumbnails'],
+    [sidebarTabOutline, 'outline'],
+    [sidebarTabBookmarks, 'bookmarks'],
+  ];
+  tabs.forEach(([button, tab]) => {
+    button?.classList.toggle('active', activeSidebarTab === tab);
+    button?.setAttribute('aria-selected', String(activeSidebarTab === tab));
+  });
+  const moreActive = sidebarMoreTabs.includes(activeSidebarTab);
+  sidebarTabMore?.classList.toggle('active', moreActive);
+  sidebarTabMore?.setAttribute('aria-selected', String(moreActive));
+  if (sidebarTabMoreLabel) {
+    sidebarTabMoreLabel.textContent = moreActive ? (sidebarMoreLabels[activeSidebarTab] || '更多') : '更多';
+  }
+  sidebarMoreFonts?.classList.toggle('active', activeSidebarTab === 'fonts');
+  sidebarMoreAttachments?.classList.toggle('active', activeSidebarTab === 'attachments');
+  sidebarMoreMedia?.classList.toggle('active', activeSidebarTab === 'media');
+  sidebarMoreAnnotations?.classList.toggle('active', activeSidebarTab === 'annotations');
+  sidebarMoreSignatures?.classList.toggle('active', activeSidebarTab === 'signatures');
+  if (sidebarMoreMenu && thumbnailsVisible === false) setSidebarMoreOpen(false);
+  if (thumbnailSizeSlider) thumbnailSizeSlider.value = String(thumbnailSizePercent);
+}
+
+function setSidebarMoreOpen(open) {
+  if (!sidebarMoreMenu) return;
+  sidebarMoreMenu.hidden = !open;
+  sidebarTabMore?.setAttribute('aria-expanded', String(open));
+  if (open) {
+    setViewPanelOpen(false);
+    setSearchPanelOpen(false);
+    setZoomMenuOpen(false);
+    setDocumentMenuOpen(false);
+  }
+}
+
+function setSidebarTab(tab) {
+  if (!sidebarTabs.includes(tab)) tab = 'thumbnails';
+  const changed = activeSidebarTab !== tab;
+  if ((activeSidebarTab === 'media' || activeSidebarTab === 'signatures') && tab !== activeSidebarTab) revokeMediaURLs();
+  activeSidebarTab = tab;
+  if (changed) {
+    try {
+      localStorage.setItem(sidebarTabStorageKey, tab);
+    } catch (_) {}
+  }
+  if (sidebarMoreTabs.includes(tab)) setSidebarMoreOpen(false);
+  applySidebarPanels();
+  if (tab === 'thumbnails') {
+    updateThumbnailMetrics();
+    scheduleVirtualUpdate();
+  } else if (tab === 'outline') {
+    renderOutline();
+    updateOutlineActive();
+  } else if (tab === 'bookmarks') {
+    renderBookmarks();
+    updateOutlineActive();
+  } else if (tab === 'attachments') {
+    renderAttachments();
+  } else if (tab === 'media') {
+    renderMedia();
+  } else if (tab === 'annotations') {
+    renderAnnotations();
+  } else if (tab === 'signatures') {
+    renderSignatures();
+  } else {
+    renderFonts();
+  }
+}
+
+function toggleSidebar() {
+  setThumbnailsVisible(!thumbnailsVisible);
+}
+
+// cycleSidebarPanel 在侧栏面板之间循环切换（含“更多”里的字体/附件/资源/注解/签名）。
+function cycleSidebarPanel(step) {
+  if (!sidebarTabs.length) return;
+  if (!thumbnailsVisible) setThumbnailsVisible(true);
+  const index = sidebarTabs.indexOf(activeSidebarTab);
+  const next = sidebarTabs[(index + step + sidebarTabs.length) % sidebarTabs.length];
+  setSidebarTab(next);
+}
+
+function setThumbnailSize(percent) {
+  const value = Math.max(40, Math.min(100, Math.round(Number(percent) || 100)));
+  if (value === thumbnailSizePercent) return;
+  thumbnailSizePercent = value;
+  updateThumbnailMetrics();
+  scheduleVirtualUpdate();
+}
+
+function persistThumbnailSize() {
+  try {
+    localStorage.setItem(thumbnailSizeStorageKey, String(thumbnailSizePercent));
+  } catch (_) {}
+}
+
+function applySidebarWidth() {
+  if (!readerElement) return;
+  readerElement.style.setProperty('--thumbnail-column', `${sidebarWidth}px`);
+}
+
+function setSidebarWidth(value) {
+  const max = Math.max(180, Math.min(520, window.innerWidth - 320));
+  sidebarWidth = Math.max(140, Math.min(max, Math.round(value)));
+  applySidebarWidth();
+}
+
+function persistSidebarWidth() {
+  try {
+    localStorage.setItem(sidebarWidthStorageKey, String(sidebarWidth));
+  } catch (_) {}
+}
+
+function finishSidebarResize() {
+  persistSidebarWidth();
+  updateThumbnailMetrics();
+  updatePageVirtualMetrics();
+  if (zoomMode === 'fit') fitWidthZoom();
+  else if (zoomMode === 'page') fitPageZoom();
+  scheduleVirtualUpdate();
+}
+
+function resetSidebarFilter() {
+  sidebarFilterValue = '';
+  if (sidebarFilter) sidebarFilter.value = '';
+}
+
 function setThumbnailsVisible(visible) {
   thumbnailsVisible = visible;
   showThumbnails.checked = visible;
-  thumbnailsElement.hidden = !visible;
+  applySidebarPanels();
   readerElement.classList.toggle('hide-thumbnails', !visible);
   document.body.classList.toggle('hide-thumbnails', !visible);
   try {
@@ -3491,6 +3947,1374 @@ function setThumbnailsVisible(visible) {
   requestAnimationFrame(() => {
     if (zoomMode === 'fit') fitWidthZoom();
     else if (zoomMode === 'page') fitPageZoom();
+  });
+}
+
+function hasSavedPreference(key) {
+  try {
+    return localStorage.getItem(key) != null;
+  } catch (_) {
+    return false;
+  }
+}
+
+// 文档声明的页面布局到阅读器布局的近似映射；未识别时返回空串。
+function mapDocumentPageLayout(value) {
+  switch (String(value)) {
+    case 'OnePage':
+    case 'OneColumn':
+      return 'single';
+    case 'TwoPageL':
+    case 'TwoColumnL':
+      return 'double-odd-left';
+    case 'TwoPageR':
+    case 'TwoColumnR':
+      return 'double';
+    default:
+      return '';
+  }
+}
+
+// 文档声明的缩放模式映射；FitHeight/FitRect 暂用“适应页面”近似。
+function mapDocumentZoomMode(value) {
+  switch (String(value)) {
+    case 'FitWidth':
+      return 'fit';
+    case 'FitHeight':
+    case 'FitRect':
+      return 'page';
+    default:
+      return '';
+  }
+}
+
+function normalizeDocumentZoom(value) {
+  let zoomValue = Number(value);
+  if (!Number.isFinite(zoomValue) || zoomValue <= 0) return 0;
+  if (zoomValue > 5) zoomValue /= 100;
+  return Math.max(0.5, Math.min(3, zoomValue));
+}
+
+// applyDocumentPreferences 在用户没有显式保存偏好时，应用文档声明的布局与初始缩放。
+async function applyDocumentPreferences() {
+  let preferences = null;
+  try {
+    preferences = await engine.preferences();
+  } catch (_) {
+    return;
+  }
+  if (!preferences) return;
+  if (!hasSavedPreference(pageLayoutStorageKey)) {
+    const layout = mapDocumentPageLayout(preferences.page_layout);
+    if (layout) {
+      pageLayout = layout;
+      pageLayoutSelect.value = layout;
+    }
+  }
+  if (!hasSavedPreference(zoomModeStorageKey)) {
+    const zoomValue = normalizeDocumentZoom(preferences.zoom);
+    if (zoomValue) {
+      zoom = zoomValue;
+      zoomMode = 'manual';
+    } else {
+      const mode = mapDocumentZoomMode(preferences.zoom_mode);
+      if (mode) zoomMode = mode;
+    }
+  }
+}
+
+async function loadOutline() {
+  const generation = documentGeneration;
+  let tree = null;
+  try {
+    tree = await engine.outline();
+  } catch (_) {
+    tree = null;
+  }
+  if (generation !== documentGeneration) return;
+  outlineNodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
+  bookmarkNodes = Array.isArray(tree?.bookmarks) ? tree.bookmarks : [];
+  outlineExpandState = readOutlineExpandState();
+  applyOutlineExpandState(outlineNodes);
+  renderOutline();
+  renderBookmarks();
+  // 文档声明的显示模式优先决定默认页签。
+  const mode = String(tree?.page_mode || '');
+  if (mode === 'UseOutlines' && outlineNodes.length) setSidebarTab('outline');
+  else if (mode === 'UseBookmarks' && bookmarkNodes.length) setSidebarTab('bookmarks');
+}
+
+// attachOutlineKeyboard 让大纲/书签面板支持方向键、Home/End 在条目间移动焦点。
+function attachOutlineKeyboard(panel) {
+  if (!panel || panel.dataset.keyboardBound) return;
+  panel.dataset.keyboardBound = '1';
+  panel.addEventListener('keydown', event => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const items = [...panel.querySelectorAll('.outline-label:not(:disabled), .outline-toggle')]
+      .filter(element => element.offsetParent !== null);
+    if (!items.length) return;
+    let index = items.indexOf(document.activeElement);
+    if (index < 0) index = 0;
+    if (event.key === 'ArrowDown') index = Math.min(items.length - 1, index + 1);
+    else if (event.key === 'ArrowUp') index = Math.max(0, index - 1);
+    else if (event.key === 'Home') index = 0;
+    else index = items.length - 1;
+    event.preventDefault();
+    items[index].focus();
+  });
+}
+
+function outlineEmptyMessage(text) {
+  const empty = document.createElement('p');
+  empty.className = 'outline-empty';
+  empty.textContent = text;
+  return empty;
+}
+
+function appendOutlinePageTag(row, page) {
+  if (!Number.isInteger(page) || page < 0) return;
+  const tag = document.createElement('span');
+  tag.className = 'outline-page';
+  tag.textContent = String(page + 1);
+  row.append(tag);
+}
+
+// filterOutlineTree 过滤大纲树：命中节点保留整棵子树，否则保留含命中后代的节点。
+function filterOutlineTree(nodes, needle) {
+  const result = [];
+  for (const node of nodes) {
+    const children = filterOutlineTree(node.children || [], needle);
+    if (String(node.title || '').toLowerCase().includes(needle)) {
+      result.push(node);
+    } else if (children.length) {
+      result.push({ ...node, children });
+    }
+  }
+  return result;
+}
+
+// 大纲展开状态按文档（文件标识）持久化，键为节点在树中的索引路径，如 "0.1"。
+function readOutlineExpandState() {
+  try {
+    const all = JSON.parse(localStorage.getItem(outlineExpandStorageKey) || '{}');
+    const state = currentDocumentKey ? all[currentDocumentKey] : null;
+    return state && typeof state === 'object' ? state : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function persistOutlineExpandState() {
+  if (!currentDocumentKey) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(outlineExpandStorageKey) || '{}');
+    all[currentDocumentKey] = outlineExpandState;
+    const entries = Object.entries(all).slice(-30);
+    localStorage.setItem(outlineExpandStorageKey, JSON.stringify(Object.fromEntries(entries)));
+  } catch (_) {}
+}
+
+function applyOutlineExpandState(nodes, pathPrefix = '') {
+  nodes.forEach((node, index) => {
+    const path = pathPrefix ? `${pathPrefix}.${index}` : String(index);
+    if (Object.prototype.hasOwnProperty.call(outlineExpandState, path)) {
+      node.expanded = outlineExpandState[path];
+    }
+    if (Array.isArray(node.children) && node.children.length) {
+      applyOutlineExpandState(node.children, path);
+    }
+  });
+}
+
+function setAllOutlineExpanded(expanded) {
+  setAllOutlineExpandedIn(outlineNodes, expanded);
+  persistOutlineExpandState();
+  renderOutline();
+}
+
+function setAllOutlineExpandedIn(nodes, expanded, pathPrefix = '') {
+  nodes.forEach((node, index) => {
+    const path = pathPrefix ? `${pathPrefix}.${index}` : String(index);
+    if (Array.isArray(node.children) && node.children.length) {
+      outlineExpandState[path] = expanded;
+      node.expanded = expanded;
+      setAllOutlineExpandedIn(node.children, expanded, path);
+    }
+  });
+}
+
+function renderOutline() {
+  if (!outlineElement) return;
+  if (outlineExpandAll) outlineExpandAll.disabled = Boolean(sidebarFilterValue);
+  if (outlineCollapseAll) outlineCollapseAll.disabled = Boolean(sidebarFilterValue);
+  outlineElement.replaceChildren();
+  if (!outlineNodes.length) {
+    outlineElement.append(outlineEmptyMessage('此文档没有大纲'));
+    return;
+  }
+  const nodes = sidebarFilterValue ? filterOutlineTree(outlineNodes, sidebarFilterValue) : outlineNodes;
+  if (!nodes.length) {
+    outlineElement.append(outlineEmptyMessage('无匹配结果'));
+    return;
+  }
+  outlineElement.append(buildOutlineList(nodes, 0, Boolean(sidebarFilterValue)));
+  attachOutlineKeyboard(outlineElement);
+  updateOutlineActive();
+  restorePanelScroll('outline');
+}
+
+function renderBookmarks() {
+  if (!bookmarksElement) return;
+  bookmarksElement.replaceChildren();
+  if (!bookmarkNodes.length) {
+    bookmarksElement.append(outlineEmptyMessage('此文档没有书签'));
+    return;
+  }
+  const bookmarks = sidebarFilterValue
+    ? bookmarkNodes.filter(bookmark => String(bookmark.name || '').toLowerCase().includes(sidebarFilterValue))
+    : bookmarkNodes;
+  if (!bookmarks.length) {
+    bookmarksElement.append(outlineEmptyMessage('无匹配结果'));
+    return;
+  }
+  const list = document.createElement('ul');
+  list.className = 'outline-list';
+  bookmarks.forEach(bookmark => {
+    const item = document.createElement('li');
+    item.className = 'outline-item';
+    const row = document.createElement('div');
+    row.className = 'outline-row';
+    const spacer = document.createElement('span');
+    spacer.className = 'outline-toggle-placeholder';
+    row.append(spacer);
+    const label = document.createElement('button');
+    label.type = 'button';
+    label.className = 'outline-label';
+    label.textContent = bookmark.name || '未命名书签';
+    label.title = bookmark.name || '';
+    if (Number.isInteger(bookmark.page) && bookmark.page >= 0) {
+      label.dataset.page = String(bookmark.page);
+      label.addEventListener('click', () => goToDestination(bookmark.page, bookmark.dest));
+    } else {
+      label.disabled = true;
+    }
+    row.append(label);
+    appendOutlinePageTag(row, bookmark.page);
+    item.append(row);
+    list.append(item);
+  });
+  bookmarksElement.append(list);
+  attachOutlineKeyboard(bookmarksElement);
+  updateOutlineActive();
+  restorePanelScroll('bookmarks');
+}
+
+// loadDocumentInfo 在每个文档生命周期内缓存一次 engine.info()，供信息面板和字体页签共用。
+async function loadDocumentInfo() {
+  if (documentInfoGeneration === documentGeneration && documentInfo) return documentInfo;
+  const generation = documentGeneration;
+  const info = await engine.info();
+  if (generation !== documentGeneration) return null;
+  documentInfo = info;
+  documentInfoGeneration = generation;
+  return info;
+}
+
+function buildFontItem(font) {
+  const badges = [font.embedded ? '嵌入' : '逻辑'];
+  if (font.bold) badges.push('粗体');
+  if (font.italic) badges.push('斜体');
+  if (font.serif) badges.push('衬线');
+  if (font.fixed_width) badges.push('等宽');
+  if (font.format) badges.push(String(font.format).toUpperCase());
+  const wrap = document.createElement('div');
+  wrap.className = 'font-item-wrap';
+  const item = document.createElement('div');
+  item.className = 'font-item';
+  const name = document.createElement('span');
+  name.className = 'font-name';
+  name.textContent = font.name || font.family || `字体 ${font.id}`;
+  item.append(name);
+  if (font.family && font.family !== font.name) {
+    const family = document.createElement('span');
+    family.className = 'font-family';
+    family.textContent = font.family;
+    item.append(family);
+  }
+  const badgeBox = document.createElement('span');
+  badgeBox.className = 'font-badges';
+  badges.forEach(text => {
+    const badge = document.createElement('span');
+    badge.className = 'font-badge';
+    badge.textContent = text;
+    badgeBox.append(badge);
+  });
+  item.append(badgeBox);
+  const usage = document.createElement('button');
+  usage.type = 'button';
+  usage.className = 'font-usage';
+  usage.dataset.fontKey = fontUsageKey(font);
+  usage.textContent = '定位使用页';
+  usage.addEventListener('click', () => toggleFontUsage(font, wrap, usage));
+  item.append(usage);
+  wrap.append(item);
+  return wrap;
+}
+
+function fontUsageLabel(usage) {
+  const count = Array.isArray(usage?.pages) ? usage.pages.length : 0;
+  return count ? `${count} 页` : '未使用';
+}
+
+// 字体作用域 + ID 唯一标识一个字体，避免多文档体之间字体 ID 冲突。
+function fontUsageKey(font) {
+  return `${Number(font?.scope) || 0}:${Number(font?.id)}`;
+}
+
+// fontUsageLimits 按文档规模选择统计扫描上限：小文档全量，大文档限制自动统计的扫描成本。
+function fontUsageLimits(batch) {
+  const pages = pageInfos.length || 0;
+  if (!batch) {
+    return { maxScan: Math.max(1, Math.min(pages || 1, 10000)), maxPages: 500 };
+  }
+  const maxScan = pages <= 2000 ? pages : pages <= 20000 ? 4000 : 2000;
+  return { maxScan: Math.max(1, maxScan), maxPages: 500 };
+}
+
+// loadFontUsageAll 在每个文档生命周期内缓存一次批量字体使用统计。
+async function loadFontUsageAll() {
+  if (documentFontUsageGeneration === documentGeneration && documentFontUsage) return documentFontUsage;
+  const generation = documentGeneration;
+  const report = await engine.fontUsageAll(fontUsageLimits(true));
+  if (generation !== documentGeneration) return null;
+  const map = new Map();
+  for (const entry of report?.fonts || []) {
+    map.set(fontUsageKey(entry), {
+      pages: Array.isArray(entry.pages) ? entry.pages : [],
+      scanned: report.scanned || 0,
+      truncated: !!report.truncated,
+    });
+  }
+  documentFontUsage = map;
+  documentFontUsageMeta = { scanned: report?.scanned || 0, truncated: !!report?.truncated };
+  documentFontUsageGeneration = generation;
+  return map;
+}
+
+function applyFontUsageLabels() {
+  if (!fontsElement) return;
+  const generation = documentGeneration;
+  loadFontUsageAll().then(map => {
+    if (generation !== documentGeneration || !map) return;
+    fontsElement.querySelectorAll('.font-usage').forEach(button => {
+      const usage = map.get(button.dataset.fontKey);
+      if (usage && !button.classList.contains('active')) button.textContent = fontUsageLabel(usage);
+    });
+    if (documentFontUsageMeta.truncated && !fontsElement.querySelector('.fonts-usage-note')) {
+      const note = document.createElement('p');
+      note.className = 'outline-empty fonts-usage-note';
+      note.textContent = `使用页统计仅覆盖前 ${documentFontUsageMeta.scanned} 页`;
+      fontsElement.append(note);
+    }
+  }).catch(() => {});
+}
+
+// toggleFontUsage 查找使用指定字体的页面并展开页码列表；再次点击收起。
+async function toggleFontUsage(font, wrap, button) {
+  const generation = documentGeneration;
+  const key = fontUsageKey(font);
+  const existing = wrap.querySelector('.font-pages');
+  if (existing) {
+    existing.remove();
+    button.classList.remove('active');
+    const cached = documentFontUsageGeneration === generation ? documentFontUsage?.get(key) : null;
+    button.textContent = cached ? fontUsageLabel(cached) : '定位使用页';
+    return;
+  }
+  let usage = documentFontUsageGeneration === generation ? documentFontUsage?.get(key) : null;
+  if (!usage) {
+    button.disabled = true;
+    button.textContent = '查找中…';
+    try {
+      usage = await engine.fontUsage(Number(font.scope) || 0, Number(font.id), fontUsageLimits(false));
+    } catch (_) {
+      usage = null;
+    }
+    if (generation !== documentGeneration) return;
+    button.disabled = false;
+    if (!usage) {
+      button.textContent = '查找失败';
+      return;
+    }
+    if (documentFontUsageGeneration !== generation || !documentFontUsage) {
+      documentFontUsage = new Map();
+      documentFontUsageGeneration = generation;
+    }
+    documentFontUsage.set(key, usage);
+  }
+  const pages = Array.isArray(usage.pages) ? usage.pages : [];
+  button.classList.add('active');
+  button.textContent = fontUsageLabel(usage);
+  const box = document.createElement('div');
+  box.className = 'font-pages';
+  if (!pages.length) {
+    box.append(outlineEmptyMessage(`前 ${usage.scanned || 0} 页未使用`));
+    wrap.append(box);
+    return;
+  }
+  const shown = pages.slice(0, 60);
+  shown.forEach(page => {
+    const pageButton = document.createElement('button');
+    pageButton.type = 'button';
+    pageButton.className = 'font-page';
+    pageButton.textContent = String(page + 1);
+    pageButton.title = `跳转到第 ${page + 1} 页`;
+    pageButton.addEventListener('click', () => goTo(page));
+    box.append(pageButton);
+  });
+  if (pages.length > shown.length) {
+    const more = document.createElement('span');
+    more.className = 'font-page-more';
+    more.textContent = `+${pages.length - shown.length}`;
+    box.append(more);
+  }
+  if (usage.truncated) {
+    box.append(outlineEmptyMessage(`仅扫描前 ${usage.scanned} 页，可能还有更多`));
+  }
+  wrap.append(box);
+}
+
+function renderFonts() {
+  if (!fontsElement) return;
+  const generation = documentGeneration;
+  fontsElement.replaceChildren();
+  if (!pageInfos.length) {
+    fontsElement.append(outlineEmptyMessage('未打开文档'));
+    return;
+  }
+  fontsElement.append(outlineEmptyMessage('正在读取字体...'));
+  loadDocumentInfo().then(info => {
+    if (generation !== documentGeneration) return;
+    fontsElement.replaceChildren();
+    if (!info) {
+      fontsElement.append(outlineEmptyMessage('获取字体失败'));
+      return;
+    }
+    const fonts = Array.isArray(info.fonts) ? info.fonts : [];
+    if (!fonts.length) {
+      fontsElement.append(outlineEmptyMessage('文档未声明字体'));
+      return;
+    }
+    const filtered = sidebarFilterValue
+      ? fonts.filter(font => `${font.name || ''} ${font.family || ''}`.toLowerCase().includes(sidebarFilterValue))
+      : fonts;
+    if (!filtered.length) {
+      fontsElement.append(outlineEmptyMessage('无匹配结果'));
+      return;
+    }
+    const embedded = fonts.filter(font => font.embedded).length;
+    const summary = document.createElement('p');
+    summary.className = 'fonts-summary';
+    summary.textContent = `共 ${fonts.length} 个字体（嵌入 ${embedded} · 逻辑 ${fonts.length - embedded}）`;
+    fontsElement.append(summary);
+    const list = document.createElement('div');
+    list.className = 'fonts-list';
+    filtered.forEach(font => list.append(buildFontItem(font)));
+    fontsElement.append(list);
+    applyFontUsageLabels();
+    restorePanelScroll('fonts');
+  }).catch(() => {
+    if (generation !== documentGeneration) return;
+    fontsElement.replaceChildren(outlineEmptyMessage('获取字体失败'));
+  });
+}
+
+function attachmentBadge(text, extraClass) {
+  const badge = document.createElement('span');
+  badge.className = 'attachment-badge' + (extraClass ? ` ${extraClass}` : '');
+  badge.textContent = text;
+  return badge;
+}
+
+function formatAttachmentBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// attachmentPreviewMime 返回可在新标签预览的 MIME，不支持预览时返回空串。
+function attachmentPreviewMime(item) {
+  const format = String(item?.format || '').toLowerCase();
+  const name = String(item?.name || '').toLowerCase();
+  const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : format;
+  const known = {
+    pdf: 'application/pdf',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    bmp: 'image/bmp',
+    svg: 'image/svg+xml',
+    txt: 'text/plain',
+    xml: 'application/xml',
+    json: 'application/json',
+    csv: 'text/csv',
+    md: 'text/markdown',
+    html: 'text/html',
+    htm: 'text/html',
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    ogg: 'audio/ogg',
+    mp4: 'video/mp4',
+    webm: 'video/webm',
+  };
+  return known[ext] || known[format] || '';
+}
+
+function safeResourceName(item, fallback) {
+  const raw = String(item?.name || item?.id || fallback);
+  const cleaned = raw.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/^\.+/, '').trim();
+  return cleaned || `${fallback}-${item?.id ?? ''}`;
+}
+
+async function fetchAttachmentData(item) {
+  const maxBytes = 0;
+  return engine.attachmentData(Number(item?.scope) || 0, String(item?.id ?? ''), maxBytes);
+}
+
+async function runAttachmentAction(button, action) {
+  const generation = documentGeneration;
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = '读取中…';
+  try {
+    await action();
+  } catch (error) {
+    if (generation === documentGeneration) setStatus(`附件操作失败：${error.message}`);
+  } finally {
+    if (generation === documentGeneration && button.isConnected) {
+      button.disabled = false;
+      button.textContent = label;
+    }
+  }
+}
+
+async function downloadAttachment(item) {
+  const data = await fetchAttachmentData(item);
+  const mime = attachmentPreviewMime(item) || 'application/octet-stream';
+  downloadBytes(data, safeResourceName(item, 'attachment'), mime);
+}
+
+async function previewAttachment(item) {
+  const mime = attachmentPreviewMime(item);
+  const data = await fetchAttachmentData(item);
+  const url = URL.createObjectURL(new Blob([data], { type: mime || 'application/octet-stream' }));
+  window.open(url, '_blank', 'noopener');
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+function buildAttachmentItem(item) {
+  const row = document.createElement('div');
+  row.className = 'attachment-item';
+  const info = document.createElement('div');
+  info.className = 'attachment-info';
+  const name = document.createElement('span');
+  name.className = 'attachment-name';
+  name.textContent = item?.name || item?.id || '未命名附件';
+  name.title = name.textContent;
+  const meta = document.createElement('span');
+  meta.className = 'attachment-meta';
+  const parts = [];
+  if (item?.format) parts.push(String(item.format).toUpperCase());
+  const size = formatAttachmentBytes(Number(item?.actual_size) || (item?.has_size ? Number(item?.size) : 0));
+  if (size) parts.push(size);
+  meta.textContent = parts.join(' · ');
+  info.append(name, meta);
+
+  const badges = document.createElement('span');
+  badges.className = 'attachment-badges';
+  if (!item?.visible) badges.append(attachmentBadge('隐藏', 'attachment-warn'));
+  if (item?.usage && item.usage !== 'none') badges.append(attachmentBadge(String(item.usage)));
+  if (!item?.exists) badges.append(attachmentBadge('文件缺失', 'attachment-warn'));
+
+  const actions = document.createElement('span');
+  actions.className = 'attachment-actions';
+  const download = document.createElement('button');
+  download.type = 'button';
+  download.className = 'attachment-action';
+  download.textContent = '下载';
+  const preview = document.createElement('button');
+  preview.type = 'button';
+  preview.className = 'attachment-action';
+  preview.textContent = '预览';
+  if (!item?.exists) {
+    download.disabled = true;
+    preview.disabled = true;
+  } else {
+    download.addEventListener('click', () => runAttachmentAction(download, () => downloadAttachment(item)));
+    if (attachmentPreviewMime(item)) {
+      preview.addEventListener('click', () => runAttachmentAction(preview, () => previewAttachment(item)));
+    } else {
+      preview.hidden = true;
+    }
+  }
+  actions.append(download);
+  if (!preview.hidden) actions.append(preview);
+
+  row.append(info, badges, actions);
+  return row;
+}
+
+function renderAttachments() {
+  if (!attachmentsElement) return;
+  const generation = documentGeneration;
+  attachmentsElement.replaceChildren();
+  if (!pageInfos.length) {
+    attachmentsElement.append(outlineEmptyMessage('未打开文档'));
+    return;
+  }
+  attachmentsElement.append(outlineEmptyMessage('正在读取附件...'));
+  engine.attachments().then(list => {
+    if (generation !== documentGeneration) return;
+    const attachments = Array.isArray(list) ? list : [];
+    attachmentsElement.replaceChildren();
+    if (!attachments.length) {
+      attachmentsElement.append(outlineEmptyMessage('此文档没有附件'));
+      return;
+    }
+    const filtered = sidebarFilterValue
+      ? attachments.filter(item => `${item.name || ''} ${item.format || ''}`.toLowerCase().includes(sidebarFilterValue))
+      : attachments;
+    if (!filtered.length) {
+      attachmentsElement.append(outlineEmptyMessage('无匹配结果'));
+      return;
+    }
+    filtered.forEach(item => attachmentsElement.append(buildAttachmentItem(item)));
+    restorePanelScroll('attachments');
+  }).catch(() => {
+    if (generation !== documentGeneration) return;
+    attachmentsElement.replaceChildren(outlineEmptyMessage('获取附件失败'));
+  });
+}
+
+function revokeMediaURLs() {
+  mediaObserver?.disconnect();
+  mediaObserver = null;
+  mediaObjectURLs.forEach(url => URL.revokeObjectURL(url));
+  mediaObjectURLs = [];
+}
+
+// mediaMime 根据资源名后缀或声明格式推断 MIME。
+function mediaMime(item) {
+  const name = String(item?.name || '').toLowerCase();
+  const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : String(item?.format || '').toLowerCase();
+  const known = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    bmp: 'image/bmp',
+    webp: 'image/webp',
+    svg: 'image/svg+xml',
+    tif: 'image/tiff',
+    tiff: 'image/tiff',
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    ogg: 'audio/ogg',
+    m4a: 'audio/mp4',
+    aac: 'audio/aac',
+    mp4: 'video/mp4',
+    webm: 'video/webm',
+    mov: 'video/quicktime',
+    avi: 'video/x-msvideo',
+    mkv: 'video/x-matroska',
+  };
+  return known[ext] || '';
+}
+
+function mediaKind(item) {
+  const type = String(item?.type || '').toLowerCase();
+  if (type === 'audio') return 'audio';
+  if (type === 'video') return 'video';
+  return 'image';
+}
+
+function mediaTypeLabel(item) {
+  const kind = mediaKind(item);
+  return kind === 'audio' ? '音频' : kind === 'video' ? '视频' : '图片';
+}
+
+function mediaIcon(kind) {
+  return kind === 'audio' ? 'music_note' : kind === 'video' ? 'movie' : 'image';
+}
+
+async function fetchMediaData(item) {
+  return engine.mediaData(Number(item?.scope) || 0, Number(item?.id), 0);
+}
+
+async function previewMedia(item) {
+  const data = await fetchMediaData(item);
+  const mime = mediaMime(item) || 'application/octet-stream';
+  const url = URL.createObjectURL(new Blob([data], { type: mime }));
+  window.open(url, '_blank', 'noopener');
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+async function downloadMedia(item) {
+  const data = await fetchMediaData(item);
+  downloadBytes(data, safeResourceName(item, 'resource'), mediaMime(item) || 'application/octet-stream');
+}
+
+function buildMediaItem(item) {
+  const kind = mediaKind(item);
+  const element = document.createElement('button');
+  element.type = 'button';
+  element.className = 'media-item loading';
+  element.item = item;
+  element.title = item?.name || `资源 ${item?.id}`;
+  element.addEventListener('click', () => {
+    void previewMedia(item).catch(error => setStatus(`资源打开失败：${error.message}`));
+  });
+  const thumb = document.createElement('span');
+  thumb.className = 'media-thumb';
+  const icon = document.createElement('span');
+  icon.className = 'material-symbols-outlined';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = mediaIcon(kind);
+  thumb.append(icon);
+  const meta = document.createElement('span');
+  meta.className = 'media-meta';
+  const size = formatAttachmentBytes(Number(item?.size) || 0);
+  meta.textContent = [mediaTypeLabel(item), size].filter(Boolean).join(' · ');
+  element.append(thumb, meta);
+  return element;
+}
+
+async function loadMediaThumb(element) {
+  const item = element.item;
+  if (!item || element.dataset.loaded) return;
+  element.dataset.loaded = '1';
+  try {
+    const data = await fetchMediaData(item);
+    const mime = mediaMime(item) || 'application/octet-stream';
+    const url = URL.createObjectURL(new Blob([data], { type: mime }));
+    mediaObjectURLs.push(url);
+    const thumb = element.querySelector('.media-thumb');
+    const icon = thumb?.querySelector('.material-symbols-outlined');
+    const img = document.createElement('img');
+    img.alt = item.name || '';
+    img.src = url;
+    img.addEventListener('load', () => {
+      if (icon) icon.hidden = true;
+      const meta = element.querySelector('.media-meta');
+      if (!meta || !img.naturalWidth) return;
+      const size = formatAttachmentBytes(Number(item.size) || 0);
+      meta.textContent = [mediaTypeLabel(item), `${img.naturalWidth}×${img.naturalHeight}`, size].filter(Boolean).join(' · ');
+    });
+    img.addEventListener('error', () => img.remove());
+    thumb?.append(img);
+  } catch (_) {
+    // 缩略图加载失败时保留类型图标。
+  } finally {
+    element.classList.remove('loading');
+  }
+}
+
+function renderMedia() {
+  if (!mediaElement) return;
+  const generation = documentGeneration;
+  revokeMediaURLs();
+  mediaElement.replaceChildren();
+  if (!pageInfos.length) {
+    mediaElement.append(outlineEmptyMessage('未打开文档'));
+    return;
+  }
+  mediaElement.append(outlineEmptyMessage('正在读取资源...'));
+  engine.media().then(list => {
+    if (generation !== documentGeneration) return;
+    const resources = Array.isArray(list) ? list : [];
+    mediaElement.replaceChildren();
+    if (!resources.length) {
+      mediaElement.append(outlineEmptyMessage('此文档没有多媒体资源'));
+      return;
+    }
+    const filtered = sidebarFilterValue
+      ? resources.filter(item => `${item.name || ''} ${item.format || ''} ${item.type || ''}`.toLowerCase().includes(sidebarFilterValue))
+      : resources;
+    if (!filtered.length) {
+      mediaElement.append(outlineEmptyMessage('无匹配结果'));
+      return;
+    }
+    const grid = document.createElement('div');
+    grid.className = 'media-grid';
+    filtered.forEach(item => grid.append(buildMediaItem(item)));
+    mediaElement.append(grid);
+    const thumbs = [...grid.querySelectorAll('.media-item')].filter(element => mediaKind(element.item) === 'image');
+    grid.querySelectorAll('.media-item').forEach(element => {
+      if (mediaKind(element.item) !== 'image') element.classList.remove('loading');
+    });
+    if (thumbs.length && typeof IntersectionObserver === 'function') {
+      mediaObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (!entry.isIntersecting) return;
+          mediaObserver?.unobserve(entry.target);
+          void loadMediaThumb(entry.target);
+        });
+      }, { root: mediaElement, rootMargin: '200px' });
+      thumbs.forEach(element => mediaObserver.observe(element));
+    } else {
+      thumbs.forEach(element => { void loadMediaThumb(element); });
+    }
+    restorePanelScroll('media');
+  }).catch(() => {
+    if (generation !== documentGeneration) return;
+    mediaElement.replaceChildren(outlineEmptyMessage('获取资源失败'));
+  });
+}
+
+function goToAnnotation(info) {
+  const boundary = info?.boundary;
+  if (boundary && Number.isFinite(boundary.x) && Number.isFinite(boundary.y)) {
+    goToDestination(info.page, { type: 'XYZ', left: boundary.x, top: boundary.y, right: null, bottom: null, zoom: null });
+    return;
+  }
+  goTo(info.page);
+}
+
+function buildAnnotationItem(info) {
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.className = 'annotation-item';
+  const hasPage = Number.isInteger(info?.page) && info.page >= 0;
+  if (hasPage) {
+    item.addEventListener('click', () => goToAnnotation(info));
+    item.title = `跳转到第 ${info.page + 1} 页`;
+  } else {
+    item.disabled = true;
+  }
+  const page = document.createElement('span');
+  page.className = 'outline-page';
+  page.textContent = hasPage ? String(info.page + 1) : '—';
+  const type = document.createElement('span');
+  type.className = 'annotation-type';
+  type.textContent = [info?.type, info?.subtype].filter(Boolean).join(' / ') || '注解';
+  item.append(page, type);
+  const metaText = [info?.creator, info?.last_mod_date].filter(Boolean).join(' · ');
+  if (metaText) {
+    const meta = document.createElement('span');
+    meta.className = 'annotation-meta';
+    meta.textContent = metaText;
+    item.append(meta);
+  }
+  if (info?.remark) {
+    const remark = document.createElement('span');
+    remark.className = 'annotation-remark';
+    remark.textContent = info.remark;
+    item.append(remark);
+  }
+  if (info?.visible === false) item.append(attachmentBadge('隐藏', 'attachment-warn'));
+  return item;
+}
+
+function renderAnnotations() {
+  if (!annotationsElement) return;
+  const generation = documentGeneration;
+  annotationsElement.replaceChildren();
+  if (!pageInfos.length) {
+    annotationsElement.append(outlineEmptyMessage('未打开文档'));
+    return;
+  }
+  annotationsElement.append(outlineEmptyMessage('正在读取注解...'));
+  engine.annotations().then(list => {
+    if (generation !== documentGeneration) return;
+    const annotations = Array.isArray(list) ? list : [];
+    annotationsElement.replaceChildren();
+    if (!annotations.length) {
+      annotationsElement.append(outlineEmptyMessage('此文档没有注解'));
+      return;
+    }
+    const filtered = sidebarFilterValue
+      ? annotations.filter(item => `${item.type || ''} ${item.subtype || ''} ${item.creator || ''} ${item.remark || ''}`.toLowerCase().includes(sidebarFilterValue))
+      : annotations;
+    if (!filtered.length) {
+      annotationsElement.append(outlineEmptyMessage('无匹配结果'));
+      return;
+    }
+    filtered.forEach(item => annotationsElement.append(buildAnnotationItem(item)));
+    restorePanelScroll('annotations');
+  }).catch(() => {
+    if (generation !== documentGeneration) return;
+    annotationsElement.replaceChildren(outlineEmptyMessage('获取注解失败'));
+  });
+}
+
+// signatureMethodLabel 把常见签名/摘要算法 OID 显示为易读名称。
+function signatureMethodLabel(method) {
+  const value = String(method || '');
+  const known = {
+    '1.2.156.10197.1.501': 'SM2',
+    '1.2.156.10197.1.401': 'SM3',
+    '1.3.14.3.2.26': 'SHA1',
+    '1.2.840.113549.2.5': 'MD5',
+    '2.16.840.1.101.3.4.2.1': 'SHA256',
+  };
+  return known[value] || value;
+}
+
+function sealMime(type) {
+  const value = String(type || '').toLowerCase();
+  if (value === 'png') return 'image/png';
+  if (value === 'jpg' || value === 'jpeg') return 'image/jpeg';
+  return '';
+}
+
+function signatureSealIcon() {
+  const icon = document.createElement('span');
+  icon.className = 'material-symbols-outlined signature-seal-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = 'verified_user';
+  return icon;
+}
+
+function buildSignatureStamp(info, stamp, stampIndex) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'signature-stamp';
+  const hasPage = Number.isInteger(stamp?.page) && stamp.page >= 0;
+  if (hasPage) {
+    button.addEventListener('click', () => goToAnnotation({ page: stamp.page, boundary: stamp.boundary }));
+    button.title = `跳转到第 ${stamp.page + 1} 页`;
+  } else {
+    button.disabled = true;
+  }
+  const mime = sealMime(stamp?.seal_type);
+  if (stamp?.has_seal && mime) {
+    const img = document.createElement('img');
+    img.className = 'signature-seal';
+    img.alt = '印章';
+    engine.signatureSeal(Number(info.scope) || 0, String(info.id), stampIndex).then(data => {
+      const url = URL.createObjectURL(new Blob([data], { type: mime }));
+      mediaObjectURLs.push(url);
+      img.src = url;
+    }).catch(() => img.replaceWith(signatureSealIcon()));
+    button.append(img);
+  } else {
+    button.append(signatureSealIcon());
+  }
+  const label = document.createElement('span');
+  label.textContent = hasPage ? `第 ${stamp.page + 1} 页` : '签章';
+  button.append(label);
+  return button;
+}
+
+function buildSignatureItem(info) {
+  const item = document.createElement('div');
+  item.className = 'signature-item';
+  const head = document.createElement('div');
+  head.className = 'signature-head';
+  const title = document.createElement('span');
+  title.className = 'signature-title';
+  title.textContent = info.provider || info.company || `签名 ${info.id}`;
+  head.append(title);
+  const metaParts = [];
+  if (info.company && info.company !== info.provider) metaParts.push(info.company);
+  const method = signatureMethodLabel(info.method);
+  if (method) metaParts.push(method);
+  if (info.date) metaParts.push(info.date);
+  if (metaParts.length) {
+    const meta = document.createElement('span');
+    meta.className = 'signature-meta';
+    meta.textContent = metaParts.join(' · ');
+    head.append(meta);
+  }
+  if (info.has_digest) head.append(attachmentBadge(info.digest_valid ? '摘要一致' : '摘要不一致', info.digest_valid ? 'attachment-ok' : 'attachment-warn'));
+  if (info.has_verification) {
+    head.append(attachmentBadge(info.verified ? '验签通过' : '验签失败', info.verified ? 'attachment-ok' : 'attachment-warn'));
+    if (info.trust_checked) head.append(attachmentBadge(info.trusted ? '可信' : '未授信', info.trusted ? 'attachment-ok' : 'attachment-warn'));
+    else head.append(attachmentBadge('未校验证书链', ''));
+  }
+  item.append(head);
+  if (info.verification_error) {
+    const error = document.createElement('p');
+    error.className = 'outline-empty';
+    error.textContent = `验签错误：${info.verification_error}`;
+    item.append(error);
+  }
+  if (Array.isArray(info.references) && info.references.length) {
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'signature-detail-toggle';
+    toggle.textContent = `签名范围（${info.references.length}）`;
+    const box = document.createElement('div');
+    box.className = 'signature-refs';
+    box.hidden = true;
+    if (info.has_data_hash) {
+      const row = document.createElement('div');
+      row.className = 'signature-ref';
+      row.append(attachmentBadge(info.data_hash_match ? '数据摘要一致' : '数据摘要不一致', info.data_hash_match ? 'attachment-ok' : 'attachment-warn'));
+      box.append(row);
+    }
+    const shown = info.references.slice(0, 50);
+    shown.forEach(reference => {
+      const row = document.createElement('div');
+      row.className = 'signature-ref';
+      const path = document.createElement('span');
+      path.className = 'signature-ref-path';
+      path.textContent = reference.file_ref;
+      path.title = reference.file_ref;
+      row.append(path);
+      if (!reference.exists) row.append(attachmentBadge('文件缺失', 'attachment-warn'));
+      else row.append(attachmentBadge(reference.match ? '摘要一致' : '摘要不一致', reference.match ? 'attachment-ok' : 'attachment-warn'));
+      if (reference.error) {
+        const error = document.createElement('span');
+        error.className = 'signature-ref-error';
+        error.textContent = reference.error;
+        row.append(error);
+      }
+      box.append(row);
+    });
+    if (info.references.length > shown.length) {
+      const more = document.createElement('div');
+      more.className = 'signature-ref';
+      more.textContent = `…其余 ${info.references.length - shown.length} 项`;
+      box.append(more);
+    }
+    toggle.addEventListener('click', () => {
+      box.hidden = !box.hidden;
+      toggle.classList.toggle('active', !box.hidden);
+    });
+    item.append(toggle, box);
+  }
+  if (Array.isArray(info.stamps) && info.stamps.length) {
+    const stamps = document.createElement('div');
+    stamps.className = 'signature-stamps';
+    info.stamps.forEach((stamp, stampIndex) => stamps.append(buildSignatureStamp(info, stamp, stampIndex)));
+    item.append(stamps);
+  }
+  if (Array.isArray(info.certificates) && info.certificates.length) {
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'signature-detail-toggle';
+    toggle.textContent = '证书详情';
+    const box = document.createElement('div');
+    box.className = 'signature-certs';
+    box.hidden = true;
+    info.certificates.forEach(cert => box.append(buildCertificateDetail(info, cert)));
+    toggle.addEventListener('click', () => {
+      box.hidden = !box.hidden;
+      toggle.classList.toggle('active', !box.hidden);
+    });
+    item.append(toggle, box);
+  }
+  const valueButton = document.createElement('button');
+  valueButton.type = 'button';
+  valueButton.className = 'signature-detail-toggle';
+  valueButton.textContent = '导出签名值';
+  valueButton.addEventListener('click', () => runAttachmentAction(valueButton, () => downloadSignatureValue(info)));
+  item.append(valueButton);
+  return item;
+}
+
+function derToPEM(der) {
+  const bytes = new Uint8Array(der);
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+  const lines = (btoa(binary).match(/.{1,64}/g) || []).join('\n');
+  return `-----BEGIN CERTIFICATE-----\n${lines}\n-----END CERTIFICATE-----\n`;
+}
+
+function certificateFileBase(info, cert) {
+  const name = `${info?.provider || info?.company || info?.id || 'certificate'}-${cert?.slot_key || 'cert'}`;
+  return safeResourceName({ name }, 'certificate');
+}
+
+async function downloadCertificate(info, cert, format) {
+  const der = await engine.signatureCertificate(Number(info?.scope) || 0, String(info?.id), String(cert?.slot_key));
+  const base = certificateFileBase(info, cert);
+  if (format === 'pem') {
+    downloadBytes(new TextEncoder().encode(derToPEM(der)), `${base}.pem`, 'application/x-pem-file');
+  } else {
+    downloadBytes(der, `${base}.der`, 'application/pkix-cert');
+  }
+}
+
+async function downloadSignatureValue(info) {
+  const data = await engine.signatureValue(Number(info?.scope) || 0, String(info?.id));
+  const base = safeResourceName({ name: info?.provider || info?.company || info?.id || 'signature' }, 'signature');
+  downloadBytes(data, `${base}.dat`, 'application/octet-stream');
+}
+
+function buildCertificateDetail(info, cert) {
+  const box = document.createElement('div');
+  box.className = 'certificate';
+  const title = document.createElement('div');
+  title.className = 'certificate-title';
+  title.textContent = `${cert?.slot || '证书'}证书`;
+  box.append(title);
+  const badges = document.createElement('div');
+  badges.className = 'certificate-badges';
+  badges.append(attachmentBadge(cert?.signature_valid ? '签名有效' : '签名无效', cert?.signature_valid ? 'attachment-ok' : 'attachment-warn'));
+  badges.append(attachmentBadge(cert?.certificate_valid ? '证书在有效期内' : '证书有效期未通过', cert?.certificate_valid ? 'attachment-ok' : 'attachment-warn'));
+  if (cert?.trust_checked) badges.append(attachmentBadge(cert.trusted ? '证书链可信' : '证书链不可信', cert.trusted ? 'attachment-ok' : 'attachment-warn'));
+  else badges.append(attachmentBadge('未校验证书链', ''));
+  if (cert?.revocation_checked) badges.append(attachmentBadge(`吊销：${cert.revocation_status || 'unknown'}`, cert.revocation_status === 'good' ? 'attachment-ok' : 'attachment-warn'));
+  box.append(badges);
+  const rows = [
+    ['主体', cert?.subject],
+    ['签发者', cert?.issuer],
+    ['序列号', cert?.serial_number],
+    ['有效期', cert?.not_before && cert?.not_after ? `${cert.not_before} ~ ${cert.not_after}` : ''],
+    ['公钥', cert?.public_key],
+    ['签名算法', signatureMethodLabel(cert?.algorithm)],
+    ['签名格式', cert?.signature_format],
+  ];
+  rows.forEach(([label, value]) => {
+    if (!value) return;
+    const row = document.createElement('div');
+    row.className = 'certificate-row';
+    const name = document.createElement('span');
+    name.className = 'certificate-label';
+    name.textContent = label;
+    const text = document.createElement('span');
+    text.className = 'certificate-value';
+    text.textContent = value;
+    row.append(name, text);
+    box.append(row);
+  });
+  const errors = [cert?.trust_error, cert?.revocation_error, cert?.error].filter(Boolean);
+  if (errors.length) {
+    const error = document.createElement('p');
+    error.className = 'outline-empty';
+    error.textContent = errors.join('；');
+    box.append(error);
+  }
+  if (cert?.slot_key) {
+    const actions = document.createElement('div');
+    actions.className = 'certificate-actions';
+    const derButton = document.createElement('button');
+    derButton.type = 'button';
+    derButton.className = 'certificate-action';
+    derButton.textContent = '导出 DER';
+    derButton.addEventListener('click', () => runAttachmentAction(derButton, () => downloadCertificate(info, cert, 'der')));
+    const pemButton = document.createElement('button');
+    pemButton.type = 'button';
+    pemButton.className = 'certificate-action';
+    pemButton.textContent = '导出 PEM';
+    pemButton.addEventListener('click', () => runAttachmentAction(pemButton, () => downloadCertificate(info, cert, 'pem')));
+    actions.append(derButton, pemButton);
+    box.append(actions);
+  }
+  return box;
+}
+
+function renderSignatures() {
+  if (!signaturesElement) return;
+  const generation = documentGeneration;
+  revokeMediaURLs();
+  signaturesElement.replaceChildren();
+  if (!pageInfos.length) {
+    signaturesElement.append(outlineEmptyMessage('未打开文档'));
+    return;
+  }
+  signaturesElement.append(outlineEmptyMessage('正在读取签名...'));
+  engine.signatures().then(list => {
+    if (generation !== documentGeneration) return;
+    const signatures = Array.isArray(list) ? list : [];
+    signaturesElement.replaceChildren();
+    if (!signatures.length) {
+      signaturesElement.append(outlineEmptyMessage('此文档没有签名'));
+      return;
+    }
+    const filtered = sidebarFilterValue
+      ? signatures.filter(item => `${item.provider || ''} ${item.company || ''} ${item.method || ''} ${item.date || ''}`.toLowerCase().includes(sidebarFilterValue))
+      : signatures;
+    if (!filtered.length) {
+      signaturesElement.append(outlineEmptyMessage('无匹配结果'));
+      return;
+    }
+    filtered.forEach(item => signaturesElement.append(buildSignatureItem(item)));
+    restorePanelScroll('signatures');
+  }).catch(() => {
+    if (generation !== documentGeneration) return;
+    signaturesElement.replaceChildren(outlineEmptyMessage('获取签名失败'));
+  });
+}
+
+function buildOutlineList(nodes, depth, forceExpand = false, pathPrefix = '') {
+  const list = document.createElement('ul');
+  list.className = 'outline-list';
+  nodes.forEach((node, index) => {
+    const path = pathPrefix ? `${pathPrefix}.${index}` : String(index);
+    const item = document.createElement('li');
+    item.className = 'outline-item';
+    const row = document.createElement('div');
+    row.className = 'outline-row';
+    row.style.paddingLeft = `${depth * 14}px`;
+    const hasChildren = Array.isArray(node.children) && node.children.length > 0;
+    if (hasChildren) {
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'outline-toggle';
+      toggle.setAttribute('aria-label', '折叠/展开');
+      const icon = document.createElement('span');
+      icon.className = 'material-symbols-outlined';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.textContent = 'expand_more';
+      toggle.append(icon);
+      const children = buildOutlineList(node.children, depth + 1, forceExpand, path);
+      if (!forceExpand && node.expanded === false) {
+        children.hidden = true;
+        toggle.classList.add('collapsed');
+      }
+      toggle.addEventListener('click', () => {
+        children.hidden = !children.hidden;
+        toggle.classList.toggle('collapsed', children.hidden);
+        if (!sidebarFilterValue) {
+          outlineExpandState[path] = !children.hidden;
+          persistOutlineExpandState();
+        }
+      });
+      row.append(toggle);
+      item.append(row, children);
+    } else {
+      const spacer = document.createElement('span');
+      spacer.className = 'outline-toggle-placeholder';
+      row.append(spacer);
+      item.append(row);
+    }
+    const label = document.createElement('button');
+    label.type = 'button';
+    label.className = 'outline-label';
+    label.textContent = node.title || '未命名';
+    label.title = node.title || '';
+    if (Number.isInteger(node.page) && node.page >= 0) {
+      label.dataset.page = String(node.page);
+      label.addEventListener('click', () => goToDestination(node.page, node.dest));
+    } else if (typeof node.uri === 'string' && node.uri) {
+      label.classList.add('outline-link');
+      label.title = node.uri;
+      label.addEventListener('click', () => window.open(node.uri, '_blank', 'noopener'));
+    } else {
+      label.disabled = true;
+    }
+    row.append(label);
+    appendOutlinePageTag(row, node.page);
+    list.append(item);
+  });
+  return list;
+}
+
+// normalizeDestZoom 把 OFD 目标缩放归一化为阅读器支持的倍率。
+// 部分生产者按百分比（100=100%）书写，这里对明显大于 5 的值按百分比处理。
+function normalizeDestZoom(value) {
+  let zoomValue = Number(value);
+  if (!Number.isFinite(zoomValue) || zoomValue <= 0) return 0;
+  if (zoomValue > 5) zoomValue /= 100;
+  return Math.max(0.5, Math.min(3, zoomValue));
+}
+
+// destPagePoint 把 Dest 的 Left/Top（毫米）换算为页面显示区域内的基准像素坐标
+// （zoom=1，X 向右、Y 向下），并考虑当前页面旋转。
+function destPagePoint(info, dest) {
+  const rotation = ((pageRotation % 360) + 360) % 360;
+  const rawLeft = Number(dest.left);
+  const rawTop = Number(dest.top);
+  const x = Number.isFinite(rawLeft) ? rawLeft : 0;
+  const y = Number.isFinite(rawTop) ? rawTop : 0;
+  const base = rotation % 180 === 0 ? 820 / info.width : 820 / info.height;
+  switch (rotation) {
+    case 90:
+      return { x: (info.height - y) * base, y: x * base };
+    case 180:
+      return { x: (info.width - x) * base, y: (info.height - y) * base };
+    case 270:
+      return { x: y * base, y: (info.width - x) * base };
+    default:
+      return { x: x * base, y: y * base };
+  }
+}
+
+// fitRectZoom 计算把 Dest 的 FitR 矩形适配到可用区域所需的缩放。
+function fitRectZoom(info, dest) {
+  const rawLeft = Number(dest.left);
+  const rawTop = Number(dest.top);
+  const rawRight = Number(dest.right);
+  const rawBottom = Number(dest.bottom);
+  const rectWidth = Math.abs((Number.isFinite(rawRight) ? rawRight : info.width) - (Number.isFinite(rawLeft) ? rawLeft : 0));
+  const rectHeight = Math.abs((Number.isFinite(rawBottom) ? rawBottom : info.height) - (Number.isFinite(rawTop) ? rawTop : 0));
+  if (rectWidth <= 0 || rectHeight <= 0) return 0;
+  const base = 820 / info.width; // 毫米到基准像素在横纵方向等比
+  const rotation = ((pageRotation % 360) + 360) % 360;
+  const displayWidth = (rotation % 180 === 0 ? rectWidth : rectHeight) * base;
+  const displayHeight = (rotation % 180 === 0 ? rectHeight : rectWidth) * base;
+  const readerStyle = getComputedStyle(readerElement);
+  const verticalPadding = parseFloat(readerStyle.paddingTop) + parseFloat(readerStyle.paddingBottom);
+  const availableWidth = Math.max(1, pagesElement.clientWidth);
+  const availableHeight = Math.max(1, window.innerHeight - headerHeight() - status.offsetHeight - verticalPadding - 24);
+  return Math.max(0.5, Math.min(3, Math.min(availableWidth / displayWidth, availableHeight / displayHeight)));
+}
+
+// scrollToDestinationX 让目标横向位置对齐到阅读区左边缘（存在横向溢出时才生效）。
+function scrollToDestinationX(index, targetX) {
+  const card = pageCards[index];
+  if (!card) return;
+  const cardRect = card.getBoundingClientRect();
+  const pagesRect = pagesElement.getBoundingClientRect();
+  const desired = pagesElement.scrollLeft + (cardRect.left - pagesRect.left) + targetX - 8;
+  pagesElement.scrollLeft = Math.max(0, desired);
+}
+
+// goToDestination 跳转到指定页；有目标位置时按 Dest 的 Top/Left/Zoom 精确定位，
+// FitR 先按矩形适配缩放。旋转页面按显示方向换算坐标。
+function goToDestination(index, dest) {
+  if (!Number.isInteger(index) || index < 0 || index >= pageInfos.length) return;
+  const info = pageInfos[index];
+  if (!dest || !info || info.width <= 0) {
+    goTo(index);
+    return;
+  }
+  const type = String(dest.type || '').toUpperCase();
+  if (type === 'FITR') {
+    const fit = fitRectZoom(info, dest);
+    if (fit) setZoom(fit, 'manual');
+  } else {
+    const destZoom = normalizeDestZoom(dest.zoom);
+    if (destZoom) setZoom(destZoom, 'manual');
+  }
+  const position = pageSpreadPositionForPage(index);
+  mountPageSpread(position);
+  setCurrent(index);
+  const point = destPagePoint(info, dest);
+  const offset = pageSpreadOffset(position) + point.y * zoom;
+  const trackTop = pageVirtualTrack.getBoundingClientRect().top + window.scrollY;
+  window.scrollTo({ top: Math.max(0, trackTop + pageTrackScrollFromContent(offset)), behavior: 'smooth' });
+  schedulePageVirtualTranslate();
+  requestAnimationFrame(() => scrollToDestinationX(index, point.x * zoom));
+}
+
+// updateOutlineActive 高亮当前页对应的最近大纲项（页码不超过当前页的最后一项）。
+function updateOutlineActive() {
+  const panels = [outlineElement, bookmarksElement].filter(panel => panel && !panel.hidden);
+  panels.forEach(panel => {
+    const labels = panel.querySelectorAll('.outline-label[data-page]');
+    let active = null;
+    let activePage = -1;
+    labels.forEach(label => {
+      label.classList.remove('active');
+      const page = Number(label.dataset.page);
+      if (page <= current && page >= activePage) {
+        activePage = page;
+        active = label;
+      }
+    });
+    if (!active) return;
+    active.classList.add('active');
+    const box = panel.getBoundingClientRect();
+    const rect = active.getBoundingClientRect();
+    if (rect.top < box.top) panel.scrollTop -= box.top - rect.top;
+    else if (rect.bottom > box.bottom) panel.scrollTop += rect.bottom - box.bottom;
   });
 }
 
@@ -3538,6 +5362,15 @@ function setClarityPriority(enabled) {
   if (!pageInfos.length || previousDPI === pageDPI()) return;
   reloadPageImages();
   scheduleVirtualUpdate();
+}
+
+function setPagePillVisible(visible) {
+  pagePillVisible = visible;
+  showPagePill.checked = visible;
+  try {
+    localStorage.setItem(pagePillStorageKey, String(visible));
+  } catch (_) {}
+  updateNavigation();
 }
 
 function setTextLayerVisible(visible) {
@@ -3645,6 +5478,8 @@ pagesElement.addEventListener('drop', event => {
 previous.addEventListener('click', () => navigatePage(-1));
 next.addEventListener('click', () => navigatePage(1));
 cancelAction.addEventListener('click', cancelDocumentAction);
+documentMenuToggle.addEventListener('click', () => setDocumentMenuOpen(documentMenu.hidden));
+documentMenu.addEventListener('click', event => { if (event.target.closest('button')) setDocumentMenuOpen(false); });
 printPage.addEventListener('click', openPrintDialog);
 exportDocument.addEventListener('click', openExportDialog);
 printForm.addEventListener('change', updatePrintRangeControl);
@@ -3694,8 +5529,15 @@ searchPrevious.addEventListener('click', () => moveSearchResult(-1));
 searchNext.addEventListener('click', () => moveSearchResult(1));
 zoomOut.addEventListener('click', () => setZoom(zoom - 0.25));
 zoomIn.addEventListener('click', () => setZoom(zoom + 0.25));
-zoomFit.addEventListener('click', fitWidthZoom);
-zoomFitPage.addEventListener('click', fitPageZoom);
+zoomMenuToggle.addEventListener('click', () => setZoomMenuOpen(zoomMenu.hidden));
+zoomMenu.addEventListener('click', event => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  if (button.dataset.zoom) setZoom(Number(button.dataset.zoom), 'manual');
+  else if (button.dataset.zoomFit === 'width') fitWidthZoom();
+  else if (button.dataset.zoomFit === 'page') fitPageZoom();
+  setZoomMenuOpen(false);
+});
 rotatePageButton.addEventListener('click', rotatePage);
 readingMode.addEventListener('click', () => setReadingMode(!document.body.classList.contains('reading-mode')));
 viewToggle.addEventListener('click', () => setViewPanelOpen(viewPanel.hidden));
@@ -3703,7 +5545,100 @@ mobileToolbarToggle.addEventListener('click', () => {
   setMobileToolbarExpanded(!mobileToolbarToggle.matches('[aria-expanded="true"]'));
 });
 showThumbnails.addEventListener('change', () => setThumbnailsVisible(showThumbnails.checked));
+sidebarTabThumbnails?.addEventListener('click', () => setSidebarTab('thumbnails'));
+sidebarTabOutline?.addEventListener('click', () => setSidebarTab('outline'));
+sidebarTabBookmarks?.addEventListener('click', () => setSidebarTab('bookmarks'));
+sidebarTabMore?.addEventListener('click', () => setSidebarMoreOpen(sidebarMoreMenu?.hidden));
+sidebarMoreFonts?.addEventListener('click', () => setSidebarTab('fonts'));
+sidebarMoreAttachments?.addEventListener('click', () => setSidebarTab('attachments'));
+sidebarMoreMedia?.addEventListener('click', () => setSidebarTab('media'));
+sidebarMoreAnnotations?.addEventListener('click', () => setSidebarTab('annotations'));
+sidebarMoreSignatures?.addEventListener('click', () => setSidebarTab('signatures'));
+if (thumbnailSizeSlider) {
+  thumbnailSizeSlider.addEventListener('input', () => setThumbnailSize(Number(thumbnailSizeSlider.value)));
+  thumbnailSizeSlider.addEventListener('change', persistThumbnailSize);
+}
+outlineExpandAll?.addEventListener('click', () => setAllOutlineExpanded(true));
+outlineCollapseAll?.addEventListener('click', () => setAllOutlineExpanded(false));
+sidebarTabsElement?.addEventListener('keydown', event => {
+  if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+  const tabs = [
+    [sidebarTabThumbnails, 'thumbnails'],
+    [sidebarTabOutline, 'outline'],
+    [sidebarTabBookmarks, 'bookmarks'],
+    [sidebarTabMore, ''],
+  ].filter(([button]) => button && !button.hidden);
+  const index = tabs.findIndex(([button]) => button === document.activeElement);
+  if (index < 0) return;
+  event.preventDefault();
+  const step = event.key === 'ArrowRight' ? 1 : -1;
+  const next = tabs[(index + step + tabs.length) % tabs.length];
+  next[0].focus();
+  if (next[1]) setSidebarTab(next[1]);
+});
+if (sidebarFilter) {
+  sidebarFilter.addEventListener('input', () => {
+    sidebarFilterValue = sidebarFilter.value.trim().toLowerCase();
+    if (activeSidebarTab === 'outline') renderOutline();
+    else if (activeSidebarTab === 'bookmarks') renderBookmarks();
+    else if (activeSidebarTab === 'fonts') renderFonts();
+    else if (activeSidebarTab === 'attachments') renderAttachments();
+    else if (activeSidebarTab === 'media') renderMedia();
+    else if (activeSidebarTab === 'annotations') renderAnnotations();
+    else if (activeSidebarTab === 'signatures') renderSignatures();
+  });
+}
+if (sidebarResizer) {
+  let sidebarDrag = null;
+  sidebarResizer.addEventListener('pointerdown', event => {
+    if (window.matchMedia('(max-width: 620px)').matches) return;
+    sidebarDrag = { startX: event.clientX, startWidth: sidebarWidth };
+    sidebarResizer.classList.add('dragging');
+    try { sidebarResizer.setPointerCapture(event.pointerId); } catch (_) {}
+    event.preventDefault();
+  });
+  sidebarResizer.addEventListener('pointermove', event => {
+    if (!sidebarDrag) return;
+    setSidebarWidth(sidebarDrag.startWidth + (event.clientX - sidebarDrag.startX));
+  });
+  const stopSidebarDrag = event => {
+    if (!sidebarDrag) return;
+    sidebarDrag = null;
+    sidebarResizer.classList.remove('dragging');
+    try { sidebarResizer.releasePointerCapture(event.pointerId); } catch (_) {}
+    finishSidebarResize();
+  };
+  sidebarResizer.addEventListener('pointerup', stopSidebarDrag);
+  sidebarResizer.addEventListener('pointercancel', stopSidebarDrag);
+  sidebarResizer.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === 'ArrowLeft') setSidebarWidth(sidebarWidth - 16);
+    else if (event.key === 'ArrowRight') setSidebarWidth(sidebarWidth + 16);
+    else if (event.key === 'Home') setSidebarWidth(140);
+    else setSidebarWidth(window.innerWidth);
+    finishSidebarResize();
+  });
+  applySidebarWidth();
+}
+sidebarScrollPanels.outline = outlineElement;
+sidebarScrollPanels.bookmarks = bookmarksElement;
+sidebarScrollPanels.fonts = fontsElement;
+sidebarScrollPanels.attachments = attachmentsElement;
+sidebarScrollPanels.media = mediaElement;
+sidebarScrollPanels.annotations = annotationsElement;
+sidebarScrollPanels.signatures = signaturesElement;
+Object.entries(sidebarScrollPanels).forEach(([panel, element]) => {
+  element?.addEventListener('scroll', () => {
+    sidebarScroll[panel] = element.scrollTop;
+    persistSidebarScroll();
+  }, { passive: true });
+});
+applySidebarPanels();
 showTextLayer.addEventListener('change', () => setTextLayerVisible(showTextLayer.checked));
+showPagePill.addEventListener('change', () => setPagePillVisible(showPagePill.checked));
+pillHide.addEventListener('click', () => setPagePillVisible(false));
+showPagePill.checked = pagePillVisible;
 darkReading.addEventListener('change', () => setDarkReadingVisible(darkReading.checked));
 documentBackground.addEventListener('change', () => setDocumentBackground(documentBackground.value));
 documentBackgroundColorPicker.addEventListener('input', () => {
@@ -3775,6 +5710,13 @@ window.addEventListener('keydown', event => {
     setSearchPanelOpen(true);
     return;
   }
+  if (modifier && key === 'b') {
+    if (!editing) {
+      event.preventDefault();
+      toggleSidebar();
+    }
+    return;
+  }
   if (editing) {
     if (event.key === 'Escape' && target === searchInput) setSearchPanelOpen(false);
     return;
@@ -3782,7 +5724,20 @@ window.addEventListener('keydown', event => {
   if (event.key === 'Escape') {
     if (!searchPanel.hidden) setSearchPanelOpen(false);
     else if (!viewPanel.hidden) setViewPanelOpen(false);
+    else if (zoomMenu && !zoomMenu.hidden) setZoomMenuOpen(false);
+    else if (documentMenu && !documentMenu.hidden) setDocumentMenuOpen(false);
+    else if (sidebarMoreMenu && !sidebarMoreMenu.hidden) setSidebarMoreOpen(false);
     else if (document.body.classList.contains('reading-mode')) setReadingMode(false);
+    return;
+  }
+  if (event.key === '[') {
+    event.preventDefault();
+    cycleSidebarPanel(-1);
+    return;
+  }
+  if (event.key === ']') {
+    event.preventDefault();
+    cycleSidebarPanel(1);
     return;
   }
   if (!pageInfos.length) return;
@@ -3814,13 +5769,28 @@ window.addEventListener('keydown', event => {
       event.preventDefault();
       setZoom(zoom - 0.25);
       break;
+    case '0':
+      event.preventDefault();
+      setZoom(1);
+      break;
+    case 'f':
+      event.preventDefault();
+      fitWidthZoom();
+      break;
+    case 'F':
+      event.preventDefault();
+      fitPageZoom();
+      break;
   }
 });
 document.addEventListener('click', event => {
   if (!recentPanel.hidden && !event.target.closest('.recent-group')) setRecentPanelOpen(false);
   if (!viewPanel.hidden && !event.target.closest('.view-group')) setViewPanelOpen(false);
   if (!searchPanel.hidden && !event.target.closest('.search-group')) setSearchPanelOpen(false);
+  if (zoomMenu && !zoomMenu.hidden && !event.target.closest('.zoom-group')) setZoomMenuOpen(false);
+  if (documentMenu && !documentMenu.hidden && !event.target.closest('.page-group')) setDocumentMenuOpen(false);
   if (!infoPanel.hidden && !event.target.closest('.info-group')) setInfoPanelOpen(false);
+  if (sidebarMoreMenu && !sidebarMoreMenu.hidden && !event.target.closest('#sidebar-tabs') && !event.target.closest('#sidebar-more-menu')) setSidebarMoreOpen(false);
 });
 document.addEventListener('copy', () => {
   const selection = window.getSelection();
@@ -3847,7 +5817,11 @@ engine.ready.then(() => {
 function setRecentPanelOpen(open) {
   recentPanel.hidden = !open;
   recentToggle.setAttribute('aria-expanded', String(open));
-  if (open) void refreshRecentFiles();
+  if (open) {
+    setZoomMenuOpen(false);
+    setDocumentMenuOpen(false);
+    void refreshRecentFiles();
+  }
 }
 
 void refreshRecentFiles();

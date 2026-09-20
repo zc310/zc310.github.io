@@ -86,6 +86,49 @@ async function execute(message) {
       return unwrap(self.ofd.memStats());
     case 'info':
       return unwrap(self.ofd.info());
+    case 'outline':
+      return unwrap(self.ofd.outline());
+    case 'preferences':
+      return unwrap(self.ofd.preferences());
+    case 'fontUsage':
+      return unwrap(self.ofd.fontUsage(message.scope, message.fontID, message.maxScan, message.maxPages));
+    case 'fontUsageAll':
+      return unwrap(self.ofd.fontUsageAll(message.maxScan, message.maxPages));
+    case 'attachments':
+      return unwrap(self.ofd.attachments());
+    case 'attachmentData': {
+      const result = unwrap(self.ofd.attachmentData(message.scope, message.attachmentID, message.maxBytes));
+      const data = new Uint8Array(result);
+      return data.slice().buffer;
+    }
+    case 'media':
+      return unwrap(self.ofd.media());
+    case 'mediaData': {
+      const result = unwrap(self.ofd.mediaData(message.scope, message.mediaID, message.maxBytes));
+      const data = new Uint8Array(result);
+      return data.slice().buffer;
+    }
+    case 'annotations':
+      return unwrap(self.ofd.annotations());
+    case 'signatures':
+      return unwrap(self.ofd.signatures());
+    case 'signatureCertificate': {
+      const result = unwrap(self.ofd.signatureCertificate(message.scope, message.signatureID, message.slot));
+      const data = new Uint8Array(result);
+      return data.slice().buffer;
+    }
+    case 'signatureValue': {
+      const result = unwrap(self.ofd.signatureValue(message.scope, message.signatureID));
+      const data = new Uint8Array(result);
+      return data.slice().buffer;
+    }
+    case 'stats':
+      return unwrap(self.ofd.stats());
+    case 'signatureSeal': {
+      const result = unwrap(self.ofd.signatureSeal(message.scope, message.signatureID, message.stampIndex));
+      const data = new Uint8Array(result);
+      return data.slice().buffer;
+    }
     case 'pageInfo':
       return unwrap(self.ofd.pageInfo(message.index));
     case 'renderPage': {
