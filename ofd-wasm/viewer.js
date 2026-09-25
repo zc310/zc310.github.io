@@ -109,6 +109,10 @@ class OFDWorkerClient {
     }, [buffer]);
   }
 
+  removeFallbackFont(family) {
+    return this.request('removeFallbackFont', { family });
+  }
+
   close() {
     return this.request('close');
   }
@@ -151,6 +155,10 @@ class OFDWorkerClient {
 
   annotations() {
     return this.request('annotations');
+  }
+
+  pageLinks() {
+    return this.request('pageLinks');
   }
 
   signatures() {
@@ -372,6 +380,7 @@ const pagePill = document.querySelector('#page-pill');
 const pillHide = document.querySelector('#pill-hide');
 const darkReading = document.querySelector('#dark-reading');
 const clarityPrioritySelect = document.querySelector('#clarity-priority');
+const localFontsSelect = document.querySelector('#local-fonts');
 const renderFormatSelect = document.querySelector('#render-format');
 const documentBackground = document.querySelector('#document-background');
 const documentBackgroundColorPicker = document.querySelector('#document-background-color');
@@ -465,7 +474,11 @@ let thumbnailButtons = [];
 let current = 0;
 let documentGeneration = 0;
 let injectedFonts = new Map();
+let localFontsActive = false;
+const localFontFamilies = new Set();
 let resizeObserver;
+let pageLinks = new Map();
+let linkRequest;
 let searchResults = [];
 let activeSearchResult = -1;
 let searchGeneration = 0;
@@ -1098,6 +1111,8 @@ function mountPageSpread(position) {
     surface.className = 'page-surface';
     const textLayer = document.createElement('div');
     textLayer.className = 'text-layer';
+    const linkLayer = document.createElement('div');
+    linkLayer.className = 'link-layer';
     image.addEventListener('load', () => {
       image.classList.add('loaded');
       clearPageLoading(card, image);
@@ -1109,13 +1124,14 @@ function mountPageSpread(position) {
       markPageFailed(index);
       showPageError(index, '页面图片加载失败');
     });
-    surface.append(image, textLayer);
+    surface.append(image, textLayer, linkLayer);
     card.append(surface);
     element.append(card);
     pageCards[index] = card;
     if (textCache.has(index)) buildTextLayer(index);
     resizeObserver?.observe(card);
     loadPage(index);
+    applyPageLinks(index);
   });
   applyPageWidthToSpread(spread);
   spread.pages.forEach(index => {
@@ -1184,6 +1200,7 @@ function applyPageWidthToSpread(spread) {
       surface.style.width = rotated ? `${info.width / info.height * 100}%` : '100%';
       surface.style.height = rotated ? `${info.height / info.width * 100}%` : '100%';
     }
+    applyPageLinks(index);
   });
 }
 
@@ -1807,6 +1824,217 @@ async function preloadFallbackFonts() {
   return loaded;
 }
 
+// 本机字体：仅在用户显式勾选时按需读取，且只读取文档声明但未嵌入的字体族所
+// 需要的本地字体。字体数据注册到 WASM 回退表后立即重渲染；关闭或切换文档时
+// 移除注册，使本机字体仅在当前文档内有效（“临时”语义）。
+
+// localFontsSupported 判断当前浏览器是否支持本地字体访问 API。
+function localFontsSupported() {
+  return typeof window !== 'undefined' && typeof window.queryLocalFonts === 'function';
+}
+
+// missingFontFamilies 收集文档声明但未嵌入的字体族名（去重，保留原始名）。部分
+// 文档只填了 FontName 而没有 FamilyName，此时回退使用 name。
+async function missingFontFamilies() {
+  try {
+    const info = await loadDocumentInfo();
+    const families = new Map();
+    for (const font of info?.fonts || []) {
+      if (!font || font.embedded) continue;
+      const family = String(font.family || font.name || '').trim();
+      if (!family) continue;
+      families.set(normalizeFontFamily(family), family);
+    }
+    return families;
+  } catch (_) {
+    return new Map();
+  }
+}
+
+// normalizeFontFamily 归一化用于比较的字体族名：小写并去掉空白、连字符与样式后缀。
+function normalizeFontFamily(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '')
+    .replace(/(regular|bold|italic|light|medium|semibold|black|thin)$/g, '');
+}
+
+// FONT_FAMILY_GROUPS 把常见的字体族别名映射到等价组，用于把文档声明的字体族
+// （如“仿宋_GB2312”）与本机字体（如“FangSong”“仿宋”）对应起来。与
+// internal/render/backends/canvas/font_candidates.go 的 fallbackNameGroup 保持一致。
+const FONT_FAMILY_GROUPS = {
+  simsun: ['宋体', '宋体gb2312', 'simsun', 'nsimsun', 'songti', 'simsungb2312', 'songtigb2312', '方正小标宋', '方正小标宋gbk', '方正书宋', 'fzxbs'],
+  stsong: ['华文宋体', 'stsong'],
+  simhei: ['黑体', '黑体gb2312', 'simhei', 'heiti', 'hei', 'microsoftheiti', 'heitisc', '方正黑体', '方正黑体gbk'],
+  stheiti: ['华文黑体', 'stheiti'],
+  simkai: ['楷体', '楷体gb2312', 'simkai', 'kaiti', 'kaishu', 'kaitigb2312', '方正楷体', '方正楷体gbk'],
+  stkaiti: ['华文楷体', 'stkaiti'],
+  simfang: ['仿宋', '仿宋gb2312', 'simfang', 'fangsong', 'fangsonggb2312', '方正仿宋', '方正仿宋gbk'],
+  stfangsong: ['华文仿宋', 'stfangsong'],
+  yahei: ['微软雅黑', 'microsoftyahei', 'microsoftyaheiui', 'msyh', 'yahei'],
+  jhenghei: ['微软正黑', 'microsoftjhenghei', 'microsoftjhengheiui', 'msjh'],
+  dengxian: ['等线', 'dengxian'],
+  sanssc: ['思源黑体', 'sourcehansanssc', 'sourcehansanscn', 'notosanssc', 'notosanscjksc', 'ofdnotosanssc'],
+  serifsc: ['思源宋体', 'sourcehanserifsc', 'sourcehanserifcn', 'notoserifsc', 'notoserifcjksc'],
+  smileysans: ['smileysans', 'smileysansoblique', '得意黑'],
+};
+
+// fontFamilyGroup 返回字体族所属的等价组；未收录时返回空字符串。
+function fontFamilyGroup(name) {
+  const normalized = normalizeFontFamily(name);
+  for (const [group, members] of Object.entries(FONT_FAMILY_GROUPS)) {
+    if (members.includes(normalized)) return group;
+  }
+  return '';
+}
+
+// localFontMatchesFamily 判断本机字体是否可用于补齐文档声明的某个字体族：优先精确
+// 归一化匹配，其次按等价组匹配。
+function localFontMatchesFamily(localFont, missing) {
+  const localNorm = normalizeFontFamily(localFont.family);
+  const localGroup = fontFamilyGroup(localFont.family);
+  for (const [key, original] of missing) {
+    if (key === localNorm) return original;
+    if (localGroup) {
+      const group = fontFamilyGroup(original);
+      if (group && group === localGroup) return original;
+    }
+  }
+  return '';
+}
+
+// fetchLocalFontsForDocument 在已获得本地字体列表后，匹配文档缺失字体、读取字形
+// 数据并注册为 WASM 回退字体。返回实际注册的字体数量。queryLocalFontsPromise 必须
+// 在用户手势内同步发起（见 setLocalFonts），否则浏览器会拒绝授权。
+async function fetchLocalFontsForDocument(queryLocalFontsPromise, generation) {
+  const wanted = await missingFontFamilies();
+  wanted.delete('');
+  if (wanted.size === 0) return 0;
+
+  const available = await queryLocalFontsPromise;
+  const selected = new Map();
+  for (const font of available || []) {
+    const family = String(font.family || '').trim();
+    if (!family) continue;
+    const wantedName = localFontMatchesFamily({ family }, wanted);
+    if (!wantedName) continue;
+    // 同一目标族只取一份；优先常规字重。
+    if (selected.has(wantedName) && font.style !== 'Regular') continue;
+    if (!selected.has(wantedName) || font.style === 'Regular') {
+      selected.set(wantedName, font);
+    }
+  }
+  if (selected.size === 0) return 0;
+
+  let registered = 0;
+  for (const [wantedName, font] of selected) {
+    if (generation !== documentGeneration) return registered;
+    let data;
+    try {
+      const blob = await font.blob();
+      data = await blob.arrayBuffer();
+    } catch (_) {
+      continue;
+    }
+    if (generation !== documentGeneration) return registered;
+    const weight = font.style === 'Bold' ? 700 : 400;
+    const italic = font.style === 'Italic' || font.style === 'Bold Italic';
+    try {
+      await engine.addFallbackFont(data, wantedName, weight, italic);
+      localFontFamilies.add(wantedName);
+      registered++;
+    } catch (_) {
+      // 无法注册的本地字体不应阻止其他字体生效。
+    }
+  }
+  return registered;
+}
+
+// removeLocalFonts 移除本窗口曾注册的本机字体，使后续打开的文档不再沿用。
+async function removeLocalFonts() {
+  const families = Array.from(localFontFamilies);
+  localFontFamilies.clear();
+  for (const family of families) {
+    try {
+      await engine.removeFallbackFont(family);
+    } catch (_) {
+      // 移除失败不影响关闭流程。
+    }
+  }
+}
+
+// setLocalFonts 切换本机字体使用；仅在勾选且文档已打开时读取，失败时回滚勾选。
+async function setLocalFonts(enabled) {
+  if (!enabled) {
+    if (!localFontsActive) return;
+    localFontsActive = false;
+    await removeLocalFonts();
+    invalidatePageFonts();
+    setStatus('已停用本机字体');
+    return;
+  }
+  if (!pageInfos.length) {
+    localFontsSelect.checked = false;
+    return;
+  }
+  if (!localFontsSupported()) {
+    localFontsSelect.checked = false;
+    setStatus('当前浏览器不支持读取本机字体');
+    return;
+  }
+  // queryLocalFonts 必须在用户手势的同步任务内发起，否则浏览器会以
+  // SecurityError 拒绝且不弹授权框；先发起再 await 其余准备工作。
+  let queryPromise;
+  try {
+    queryPromise = window.queryLocalFonts();
+  } catch (error) {
+    localFontsSelect.checked = false;
+    setStatus(`读取本机字体失败：${error.message}`);
+    return;
+  }
+  const generation = documentGeneration;
+  localFontsSelect.disabled = true;
+  let registered = 0;
+  try {
+    registered = await fetchLocalFontsForDocument(queryPromise, generation);
+  } catch (error) {
+    if (generation === documentGeneration) {
+      localFontsSelect.checked = false;
+      setStatus(`读取本机字体失败：${error.message}`);
+    }
+    return;
+  } finally {
+    if (generation === documentGeneration) localFontsSelect.disabled = false;
+  }
+  if (generation !== documentGeneration) return;
+  if (registered === 0) {
+    localFontsSelect.checked = false;
+    setStatus('本机没有可用于补齐的字体');
+    return;
+  }
+  localFontsActive = true;
+  invalidatePageFonts();
+  setStatus(`已启用本机字体（${registered} 款）`);
+}
+
+// invalidatePageFonts 丢弃页面与缩略图缓存并重渲染可见页面，使字体变更生效。
+function invalidatePageFonts() {
+  cancelRequests(pageRequests);
+  cancelRequests(thumbnailRequests);
+  pageCache.clear();
+  thumbnailCache.clear();
+  thumbnailButtons.forEach(button => {
+    const image = button?.querySelector('img');
+    if (image) {
+      image.hidden = true;
+      image.removeAttribute('src');
+      image.classList.remove('loaded');
+    }
+  });
+  reloadPageImages();
+  scheduleVirtualUpdate();
+}
+
 function loadFallbackFont(source) {
   const key = `${source.family}:${source.weight}`;
   const cached = fallbackFontData.get(key);
@@ -1887,6 +2115,9 @@ function updateNavigation() {
   pageLayoutSelect.disabled = documentActionBusy || pageInfos.length === 0;
   renderFormatSelect.disabled = documentActionBusy || pageInfos.length === 0;
   clarityPrioritySelect.disabled = documentActionBusy || pageInfos.length === 0 || !imageRenderFormat();
+  if (localFontsSelect) {
+    localFontsSelect.disabled = documentActionBusy || pageInfos.length === 0 || !localFontsSupported();
+  }
   zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
   pagePill.hidden = !pagePillVisible || pageInfos.length === 0;
 }
@@ -2723,6 +2954,13 @@ async function openSelectedFile(selected) {
   openRequest?.cancel();
   openRequest = undefined;
   clearInjectedFonts();
+  // 本机字体仅在当前文档有效：切换文档时移除并复位开关。
+  void removeLocalFonts();
+  localFontsActive = false;
+  if (localFontsSelect) {
+    localFontsSelect.checked = false;
+    localFontsSelect.disabled = true;
+  }
   pageCache.clear();
   thumbnailCache.clear();
   cancelRequests(pageRequests);
@@ -2743,6 +2981,9 @@ async function openSelectedFile(selected) {
   searchResults = [];
   activeSearchResult = -1;
   searchGeneration++;
+  linkRequest?.cancel();
+  linkRequest = undefined;
+  pageLinks = new Map();
   updateSearchStatus('');
   resetRenderProgress();
   resizeObserver?.disconnect();
@@ -2836,6 +3077,7 @@ async function openSelectedFile(selected) {
     setStatus(`已打开：${selected.name}`);
     updateRenderProgress();
     void loadOutline();
+    void fetchPageLinks(generation);
     void saveRecentFile(selected);
     void reportMemory('打开文档');
   } catch (error) {
@@ -2900,6 +3142,10 @@ function cancelOpening() {
   searchRequest?.cancel();
   searchRequest = undefined;
   clearInjectedFonts();
+  // 关闭文档时一并撤销本机字体，避免影响后续文档。
+  void removeLocalFonts();
+  localFontsActive = false;
+  if (localFontsSelect) localFontsSelect.checked = false;
   // open 已经进入 Worker 时，取消只会取消前端 Promise；显式 close
   // 确保 WASM 侧不会留下被取消打开的 Reader。
   void engine.close().catch(error => console.warn('[OFD] 取消打开时释放 Reader 失败', error));
@@ -5312,6 +5558,93 @@ function scrollToDestinationX(index, targetX) {
   pagesElement.scrollLeft = Math.max(0, desired);
 }
 
+// fetchPageLinks 读取可点击链接并按页面缓存边界与动作。链接来自两处：注解
+// （Type="Link"）与页面正文图元（含模板页）的动作，两者都归一为 {page, uri,
+// target_page, dest, boundary} 结构。
+function fetchPageLinks(generation) {
+  linkRequest?.cancel();
+  pageLinks = new Map();
+  const addLink = item => {
+    if (!item || typeof item !== 'object') return;
+    const boundary = item.boundary;
+    if (!boundary || !Number.isFinite(boundary.x) || !Number.isFinite(boundary.y) ||
+        !(boundary.width > 0) || !(boundary.height > 0)) return;
+    const external = typeof item.uri === 'string' && item.uri !== '';
+    const target = Number(item.target_page);
+    const internal = Number.isInteger(target) && target >= 0;
+    if (!external && !internal) return;
+    const bucket = pageLinks.get(item.page);
+    if (bucket) bucket.push(item);
+    else pageLinks.set(item.page, [item]);
+  };
+  const collect = list => {
+    if (Array.isArray(list)) list.forEach(addLink);
+  };
+  const annotationsRequest = engine.annotations();
+  const pageLinksRequest = engine.pageLinks();
+  linkRequest = {
+    cancel: () => {
+      annotationsRequest.cancel?.();
+      pageLinksRequest.cancel?.();
+    },
+  };
+  Promise.all([
+    annotationsRequest.catch(() => []),
+    pageLinksRequest.catch(() => []),
+  ]).then(([annotations, pageGraphicLinks]) => {
+    if (generation !== documentGeneration) return;
+    const annotationList = Array.isArray(annotations) ? annotations : [];
+    annotationList.forEach(item => {
+      if (item && item.type === 'Link') addLink(item);
+    });
+    collect(pageGraphicLinks);
+    applyPageLinks();
+  }).catch(() => {
+    if (generation !== documentGeneration) return;
+    pageLinks = new Map();
+  });
+}
+
+// applyPageLinks 在指定页面上重建链接热区；不传页时重建所有已挂载页面。
+function applyPageLinks(index) {
+  const targets = Number.isInteger(index) ? [index] : Array.from(pageLinks.keys());
+  targets.forEach(pageIndex => {
+    const card = pageCards[pageIndex];
+    const layer = card?.querySelector('.link-layer');
+    if (!layer) return;
+    layer.replaceChildren();
+    const info = pageInfos[pageIndex];
+    const links = pageLinks.get(pageIndex);
+    if (!info || info.width <= 0 || info.height <= 0 || !links) return;
+    links.forEach(link => {
+      const boundary = link.boundary;
+      const hotspot = document.createElement('button');
+      hotspot.type = 'button';
+      hotspot.className = 'link-hotspot';
+      hotspot.style.left = `${(boundary.x / info.width) * 100}%`;
+      hotspot.style.top = `${(boundary.y / info.height) * 100}%`;
+      hotspot.style.width = `${(boundary.width / info.width) * 100}%`;
+      hotspot.style.height = `${(boundary.height / info.height) * 100}%`;
+      const external = typeof link.uri === 'string' && link.uri !== '';
+      hotspot.title = external ? link.uri : `跳转到第 ${(Number(link.target_page) || 0) + 1} 页`;
+      hotspot.setAttribute('aria-label', hotspot.title);
+      hotspot.addEventListener('click', () => openPageLink(link));
+      layer.append(hotspot);
+    });
+  });
+}
+
+// openPageLink 处理链接点击：外部链接在新窗口打开，内部跳转按目标位置滚动。
+function openPageLink(link) {
+  if (typeof link.uri === 'string' && link.uri !== '') {
+    window.open(link.uri, '_blank', 'noopener');
+    return;
+  }
+  const target = Number(link.target_page);
+  if (!Number.isInteger(target) || target < 0 || target >= pageInfos.length) return;
+  goToDestination(target, link.dest);
+}
+
 // goToDestination 跳转到指定页；有目标位置时按 Dest 的 Top/Left/Zoom 精确定位，
 // FitR 先按矩形适配缩放。旋转页面按显示方向换算坐标。
 function goToDestination(index, dest) {
@@ -5700,6 +6033,7 @@ documentBackgroundColorPicker.addEventListener('input', () => {
 });
 pageLayoutSelect.addEventListener('change', () => setPageLayout(pageLayoutSelect.value));
 clarityPrioritySelect.addEventListener('change', () => setClarityPriority(clarityPrioritySelect.checked));
+localFontsSelect?.addEventListener('change', () => { void setLocalFonts(localFontsSelect.checked); });
 renderFormatSelect.addEventListener('change', () => setRenderFormat(renderFormatSelect.value));
 backToTop.addEventListener('click', scrollToTop);
 window.addEventListener('scroll', updateBackToTop, { passive: true });

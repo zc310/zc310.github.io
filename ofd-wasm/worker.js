@@ -80,6 +80,8 @@ async function execute(message) {
         message.weight ?? 400,
         !!message.italic,
       ));
+    case 'removeFallbackFont':
+      return unwrap(self.ofd.removeFallbackFont(message.family));
     case 'close':
       return unwrap(self.ofd.close());
     case 'memStats':
@@ -110,6 +112,8 @@ async function execute(message) {
     }
     case 'annotations':
       return unwrap(self.ofd.annotations());
+    case 'pageLinks':
+      return unwrap(self.ofd.pageLinks());
     case 'signatures':
       return unwrap(self.ofd.signatures());
     case 'signatureCertificate': {
