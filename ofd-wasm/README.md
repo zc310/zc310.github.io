@@ -25,7 +25,7 @@
 - 注解页签按页列出文档注解（类型/子类型、创建者、日期、备注与隐藏徽标），点击跳转到对应页面的注解位置。
 - 签名页签列出文档签名（提供者/公司、算法、签名时间、摘要一致/验签通过/可信徽标），并显示每个签章所在页码与印章缩略图，点击跳转到签章位置；点击“签名范围”可展开签名覆盖的文件引用与逐项摘要校验（数据摘要一致/不一致），点击“证书详情”可展开印章/外层证书的主体、签发者、序列号、有效期、公钥、算法与签名/证书/证书链/吊销校验状态，并可导出证书（DER/PEM）；签名项提供“导出签名值”（SignedValue.dat）。
 - 大纲项带目标位置时按 `Dest` 的 `Top`/`Left`/`Zoom` 定位，`FitR` 先按矩形适配缩放，并按当前页面旋转换算坐标；带 URI 的条目在新标签页打开链接。
-- 页面上的可点击链接会叠加半透明热区：链接来自注解（`Type="Link"`）与页面正文/模板图元的 `CLICK` 动作；外部链接在新标签页打开，内部跳转按目标页与 `Dest` 定位，并随页面旋转/缩放重新布局。
+- 页面上的可点击链接会叠加半透明热区：链接来自注解（`Type="Link"`）与页面正文/模板图元的 `CLICK` 动作；外部链接在新标签页打开，内部跳转按目标页与 `Dest` 定位，附件动作（`GotoA`）对图片/PDF/文本/音视频等可预览类型在新标签页打开、其它类型下载，并随页面旋转/缩放重新布局。
 - 文档声明 `PageMode=UseOutlines` / `UseBookmarks` 且对应内容存在时默认打开相应页签；页签选择保存在浏览器本地。
 - 没有大纲或书签的文档在对应页签显示占位提示（页签始终可用，不会自动跳回缩略图），无跳转目标的大纲项不可点击；当前阅读页对应的大纲项/书签会高亮。
 - 侧栏宽度可用分隔条拖拽调整并保存在本地；大纲/书签条目右侧显示目标页码，并支持按标题过滤（保留命中项及其祖先）。
@@ -115,11 +115,32 @@ python3 -m http.server 8080 --directory cmd/ofd-wasm/web
 
 在支持 File Handling API 的 Chromium 浏览器中，将阅读器安装为 PWA 后，manifest 会将 `.ofd` 注册为可打开的文件类型。用户可以在系统文件管理器中将 `.ofd` 文件设置为使用该阅读器打开；浏览器通过 `launchQueue` 将文件交给页面。未安装为 PWA 或浏览器不支持该 API 时，仍可使用“打开文件”和拖放方式。
 
+## 用 URL 参数直接打开远程文档
+
+页面地址带上 `?file=<url>` 时，打开页面会自动下载并打开该文档，不需要再手动选择文件：
+
+```text
+http://localhost:8080/?file=docs/sample.ofd
+http://localhost:8080/?file=https%3A%2F%2Fexample.com%2Fsample.ofd&name=%E6%A0%B7%E4%BE%8B.ofd
+```
+
+- `file` 支持与页面同源的相对路径和 `http`/`https` 绝对地址；非 HTTP 协议会被拒绝。
+- `name` 可选，用于覆盖从地址推断出的文件名（例如下载地址没有 `.ofd` 后缀时）。不带 `name` 时取 URL 路径的最后一段，路径为空则用 `document.ofd`。
+- 下载不等待 WASM 初始化，与模块和字体加载并行，最长等待 `remoteFileTimeout`（120 秒），超过 `remoteFileMaxBytes`（256 MB）直接失败。
+- 打开成功后地址栏会改写为 `?file=`（`history.replaceState`），因此链接可以直接分享，刷新也会重新加载同一文档；用户在页面内使用本地文件、最近文件或拖放打开时，这两个参数会被清除。
+- 浏览器前进/后退（`popstate`）会按新地址重新加载对应的远程文档。
+- 远程文档同样进入“最近打开”，沿用 `recentFileMaxBytes`（64 MB）上限，超限的文件不写入 IndexedDB。
+- 下载请求使用 `cache: 'no-store'`，`service-worker.js` 据此让文档响应绕过 shell 缓存，因此同一地址不会读到陈旧副本。
+- 跨域地址需要目标服务器返回 `Access-Control-Allow-Origin`，否则浏览器会阻止读取；同源部署（含把 `.ofd` 放在 `web` 目录或其子目录下的静态服务）没有这个限制。
+- 下载失败只提示错误，不会锁死页面：启动页和「打开文件」、拖放入口保持可用。
+
 ## 资源缓存与更新
 
 阅读器同时受到浏览器 HTTP 缓存、Service Worker 缓存和 Web Worker 脚本缓存影响。`service-worker.js` 使用 `cache-first` 策略：资源已经进入 Cache Storage 后，普通刷新可能仍然使用旧版本；`Ctrl+F5` 也不一定能绕过 Service Worker。
 
 页面入口、页面脚本、Web Worker、`wasm_exec.js` 和 `ofd.wasm` 都使用不带查询参数的固定路径，缓存版本由 Service Worker 缓存名管理。`make build-wasm` / `make package-wasm-web` 会计算 `index.html`、`viewer.js`、`worker.js`、`wasm_exec.js`、`ofd.wasm` 的内容哈希，把 `service-worker.js` 的 `CACHE_NAME` 写成 `ofd-reader-shell_<hash>`：只要任一资源内容变化，缓存名就变化，新 Service Worker 安装后会删除旧缓存并重新缓存全部资源。
+
+`?file=` 下载的远程文档不参与这套缓存：请求带 `cache: 'no-store'`，Service Worker 直接放行，既不写入 shell 缓存也不读取缓存，因此不会占用 shell 缓存空间或命中陈旧文档。
 
 客户端已经做了两处兜底，不依赖服务器配置即可保证更新：
 
@@ -223,7 +244,8 @@ ofd.close()
 - `ofd.attachmentData(scope, id, maxBytes)` 读取附件二进制内容（返回可转移的 `ArrayBuffer`）；`maxBytes` 省略时默认 32 MiB，硬上限 128 MiB，超过上限返回错误。
 - `ofd.media()` 返回多媒体资源清单：`{ scope, id, name, type, format, size, exists }`；`type` 通常为 `Image`/`Audio`/`Video`，`name` 是资源文件名。`ofd.mediaData(scope, id, maxBytes)` 读取资源二进制内容，大小限制同附件。
 - `ofd.annotations()` 返回注解清单：`{ scope, page, id, type, subtype, creator, last_mod_date, visible, remark, uri, target_page, dest, boundary }`；`page` 是从 0 开始的全局页索引，`boundary` 为 `{ x, y, width, height }`（毫米）或 `null`。`Link` 注解的 `uri` 是外部链接（无则空串），`target_page` 是跳转目标页全局索引（无页面目标为 `-1`），`dest` 为 `{ type, left, top, right, bottom, zoom }`（无位置信息为 `null`）。
-- `ofd.pageLinks()` 返回页面正文图元上的可点击链接清单：`{ scope, page, id, uri, target_page, dest, boundary }`，字段含义同上。链接可能定义在页面的模板页上，会叠加到每个使用该模板的页面；承载链接的图元不可见时仍可点击。
+- `ofd.pageLinks()` 返回页面正文图元上的可点击链接清单：`{ scope, page, id, uri, target_page, dest, boundary, attachment_id, attachment_name, media_id, media_kind, operator, repeat, volume, event }`。链接可能定义在页面的模板页上，会叠加到每个使用该模板的页面；承载链接的图元不可见时仍可点击。`media_kind` 为 `sound` 或 `movie` 时表示点击播放声音或影片，`media_id` 对应 `ofd.media()` 的资源 ID，`operator` 为影片的 `Play`/`Stop`/`Pause`/`Resume`，`volume` 为 0 到 100 或 `null`。`attachment_id` 非空时表示附件动作（`GotoA`），点击后按 `ofd.attachmentData()` 读取：可预览类型在新标签页打开、其它类型下载，`attachment_name` 是附件名称（可能为空）。
+- `ofd.pageMediaActions()` 返回进入页面（`PO`）和打开文档（`DO`）时执行的声音、影片动作，字段与 `pageLinks` 的媒体字段相同，`event` 为 `PO` 或 `DO`。
 - `ofd.signatures()` 返回签名清单：`{ scope, id, provider, company, version, method, date, has_digest, digest_valid, digest_method, has_verification, verified, trusted, trust_checked, verification_error, has_data_hash, data_hash_match, references, stamps, certificates }`，其中 `references` 为 `{ file_ref, exists, match, error }`，`stamps` 为 `{ page, id, has_seal, seal_type, boundary }`，`certificates` 为 `{ slot, subject, issuer, common_name, organization, organizational_unit, country, locality, province, serial_number, not_before, not_after, public_key, algorithm, signature_format, signature_valid, certificate_valid, trust_checked, trusted, trust_error, revocation_checked, revocation_status, revocation_error, error }`。`ofd.signatureSeal(scope, id, stampIndex)` 返回签章印章文件内容（可转移 `ArrayBuffer`）。`ofd.signatureCertificate(scope, id, slot)` 按层级（`seal`/`outer`）返回证书 DER；`ofd.signatureValue(scope, id)` 返回签名值（SignedValue.dat）内容。
 - `ofd.stats()` 返回资源数量汇总：`{ fonts, attachments, media, annotation_pages, signatures }`，只读取声明，不加载资源内容。
 - 发生错误时，API 返回 `{ error: string }`，网页调用方应检查该字段。
@@ -250,6 +272,7 @@ attachmentData scope: number, id: number[, maxBytes]
 media
 mediaData  scope: number, id: number[, maxBytes]
 pageLinks
+pageMediaActions
 annotations
 signatures
 signatureSeal scope: number, id: number, stampIndex: number

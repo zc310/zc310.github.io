@@ -137,6 +137,10 @@ class OFDWorkerClient {
     return this.request('fontUsageAll', { maxScan: options.maxScan, maxPages: options.maxPages });
   }
 
+  versions() {
+    return this.request('versions');
+  }
+
   attachments() {
     return this.request('attachments');
   }
@@ -159,6 +163,10 @@ class OFDWorkerClient {
 
   pageLinks() {
     return this.request('pageLinks');
+  }
+
+  pageMediaActions() {
+    return this.request('pageMediaActions');
   }
 
   signatures() {
@@ -407,10 +415,12 @@ const sidebarTabMore = document.querySelector('#sidebar-tab-more');
 const sidebarTabMoreLabel = document.querySelector('#sidebar-tab-more-label');
 const sidebarMoreMenu = document.querySelector('#sidebar-more-menu');
 const sidebarMoreFonts = document.querySelector('#sidebar-more-fonts');
+const sidebarMoreVersions = document.querySelector('#sidebar-more-versions');
 const sidebarMoreAttachments = document.querySelector('#sidebar-more-attachments');
 const sidebarMoreMedia = document.querySelector('#sidebar-more-media');
 const sidebarMoreAnnotations = document.querySelector('#sidebar-more-annotations');
 const sidebarMoreSignatures = document.querySelector('#sidebar-more-signatures');
+const versionsElement = document.querySelector('#versions');
 const attachmentsElement = document.querySelector('#attachments');
 const mediaElement = document.querySelector('#media');
 const annotationsElement = document.querySelector('#annotations');
@@ -452,6 +462,15 @@ const recentDatabaseName = 'ofd-reader';
 const recentStoreName = 'files';
 const recentFileLimit = 5;
 const recentFileMaxBytes = 64 << 20;
+// URL 参数：?file=<url> 让页面打开后自动加载远程 OFD，?name= 覆盖文件名。
+// 远程文档与本地文件走同一条打开路径，也会进入「最近打开」（受 recentFileMaxBytes 限制）。
+const remoteFileQueryKey = 'file';
+const remoteFileNameQueryKey = 'name';
+// remoteFileTimeout 限制下载耗时：远端无响应时不能让启动页一直停在「正在下载」。
+const remoteFileTimeout = 120_000;
+// remoteFileMaxBytes 限制远程文档大小。地址由外部提供且不受本地文件选择器约束，
+// 超过上限时直接失败，避免把超大响应整体读进内存。
+const remoteFileMaxBytes = 256 << 20;
 const readingPositionStorageKey = 'ofd-reading-positions';
 const pageRequests = new Map();
 const pageCardRequests = new Map();
@@ -478,6 +497,9 @@ let localFontsActive = false;
 const localFontFamilies = new Set();
 let resizeObserver;
 let pageLinks = new Map();
+let pageMediaActions = [];
+let mediaCatalog = [];
+const activeMedia = new Map();
 let linkRequest;
 let searchResults = [];
 let activeSearchResult = -1;
@@ -635,6 +657,15 @@ let startupProgressActive = true;
 let startupWasmReady = false;
 let startupFontReady = false;
 let startupFontError;
+// pendingDownload 记录正在下载的远程文档：null 表示没有下载在进行。
+// 启动页文案、取消按钮和 popstate 去重都依赖它。
+let pendingDownload;
+// startupNotice 是 ?file= 路径自己给出的启动提示（下载中、参数非法、下载失败）。
+// 它比 WASM/字体就绪事件更具体，因此 updateStartupProgress 不会再改写文案，
+// 否则后到的就绪事件会把错误提示覆盖成「已准备就绪」。
+let startupNotice;
+// currentRemoteSource 记录当前文档对应的远程来源，用于 popstate 时避免重复加载。
+let currentRemoteSource;
 let renderedPages = new Set();
 let failedPages = new Set();
 let copyFeedbackTimer;
@@ -939,8 +970,11 @@ function pageSpreadPositionForPage(index) {
 }
 
 function thumbnailSlotsForLayout() {
-  if (!pageLayoutIsDouble()) return pageInfos.map((_, index) => index);
-  return pageSpreads.flatMap(spread => spread.pages);
+  const indexes = pageLayoutIsDouble()
+    ? pageSpreads.flatMap(spread => spread.pages)
+    : pageInfos.map((_, index) => index);
+  if (!versionPageFilter) return indexes;
+  return indexes.filter(index => index < 0 || versionPageFilter.has(index));
 }
 
 // 缩略图轨道与页面轨道共用同一套「超长内容压缩 + 锚点平移」策略。元素高度和
@@ -1602,6 +1636,14 @@ function updateStartupProgress() {
     setStatus(`默认中文字体加载失败：${startupFontError.message}`);
     return;
   }
+  // ?file= 路径已经给出更具体的提示（下载中、参数非法或下载失败），保持原样。
+  if (startupNotice) {
+    startupProgressLabel.textContent = startupNotice.label;
+    startupMessage.textContent = startupNotice.message;
+    setStatus(startupNotice.message);
+    startupScreen.hidden = true;
+    return;
+  }
   if (!startupWasmReady) {
     startupProgressLabel.textContent = '[1/2] 加载 WASM 模块';
     startupMessage.textContent = '正在加载 WASM 模块...';
@@ -2209,8 +2251,19 @@ function setCurrent(index, syncThumbnail = true) {
     else button.removeAttribute('aria-current');
   });
   if (changed) updateOutlineActive();
+  if (changed) playPageEntryMedia(index);
   if (zoomMode === 'page') fitPageZoom();
   updateNavigation();
+}
+
+function playPageEntryMedia(index) {
+  pageMediaActions.forEach(action => {
+    if (!action || action.media_kind !== 'sound') return;
+    if (action.event !== 'PO' && action.event !== 'DO') return;
+    if (action.event === 'PO' && Number(action.page) !== index) return;
+    if (action.event === 'DO' && index !== 0) return;
+    playMediaAction(action);
+  });
 }
 
 function goTo(index) {
@@ -2938,17 +2991,181 @@ function cancelRequests(requests) {
   if (requests === pageRequests) pageCardRequests.clear();
 }
 
+// remoteDocumentSource 解析 ?file=/?name= 参数。raw 保留用户书写的原始值用于
+// 写回地址栏，href 是相对当前页面解析后的绝对地址。
+// 参数非法时返回带 error 的对象，调用方负责提示而不是静默忽略。
+function remoteDocumentSource(search = window.location.search) {
+  let raw;
+  let override;
+  try {
+    const params = new URLSearchParams(search);
+    raw = (params.get(remoteFileQueryKey) || '').trim();
+    override = (params.get(remoteFileNameQueryKey) || '').trim();
+  } catch (_) {
+    return undefined;
+  }
+  if (!raw) return undefined;
+  let url;
+  try {
+    url = new URL(raw, window.location.href);
+  } catch (_) {
+    return { raw, name: '', error: '文件地址无效' };
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return { raw, name: '', error: '文件地址必须使用 HTTP 或 HTTPS' };
+  }
+  return { raw, href: url.href, name: override || decodePathName(url.pathname) || 'document.ofd' };
+}
+
+// decodePathName 取 URL 路径的最后一段作为文件名；转义非法时退回原始片段。
+function decodePathName(pathname) {
+  const segment = pathname.split('/').filter(Boolean).pop() || '';
+  if (!segment) return '';
+  try {
+    return decodeURIComponent(segment);
+  } catch (_) {
+    return segment;
+  }
+}
+
+// sanitizeRemoteName 清掉路径分隔符和控制字符：文件名会进入标题栏、保存文件名
+// 和 IndexedDB 主键，不能带上会误导用户的路径片段。
+function sanitizeRemoteName(name) {
+  return String(name || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim();
+}
+
+// fetchRemoteFile 下载远程 OFD 并包装成 File，让远程文档复用本地文件的打开路径。
+// 请求使用 cache: 'no-store'，Service Worker 据此让文档响应绕过 shell 缓存，
+// 避免同一地址再次访问时命中陈旧副本。
+async function fetchRemoteFile(source) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), remoteFileTimeout);
+  let response;
+  try {
+    response = await fetch(source.href, { signal: controller.signal, cache: 'no-store' });
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('下载超时或已取消');
+    // 跨域地址缺少 CORS 头时 fetch 同样失败，提示里点明这一前提。
+    throw new Error(`无法下载 ${source.href}：${error.message}（跨域地址需要 CORS 允许）`);
+  }
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const declared = Number(response.headers.get('content-length') || 0);
+  if (declared > remoteFileMaxBytes) {
+    throw new Error(`文件过大：${formatFileSize(declared)}，上限 ${formatFileSize(remoteFileMaxBytes)}`);
+  }
+  // Content-Length 可能缺失或不准确，读取完成后再校验一次实际大小。
+  const blob = await response.blob();
+  clearTimeout(timer);
+  if (!blob.size) throw new Error('文件内容为空');
+  if (blob.size > remoteFileMaxBytes) {
+    throw new Error(`文件过大：${formatFileSize(blob.size)}，上限 ${formatFileSize(remoteFileMaxBytes)}`);
+  }
+  const name = sanitizeRemoteName(source.name) || 'document.ofd';
+  const type = blob.type || 'application/ofd';
+  if (typeof File === 'function') return new File([blob], name, { type });
+  return Object.assign(new Blob([blob], { type }), { name });
+}
+
+// openRemoteDocument 下载并打开 ?file= 指定的文档。下载阶段复用「取消打开」按钮，
+// 因此这里必须自己维护 opening 状态：openSelectedFile 的状态从下载完成后才开始。
+async function openRemoteDocument(source, options = {}) {
+  if (opening) return false;
+  const controller = new AbortController();
+  // source 一起存下来：popstate 去重要比较正在下载的地址。
+  pendingDownload = { name: source.name, href: source.href, controller };
+  opening = true;
+  cancelOpen.hidden = false;
+  const generation = documentGeneration;
+  // 下载可能长达数十秒（回退字体还要从 CDN 拉取），不能停在启动页：启动页是
+  // 全屏浮层，会挡住「取消打开」按钮，用户既看不到进度也无法取消。
+  startupScreen.hidden = true;
+  startupNotice = {
+    label: '[2/2] 正在下载远程文件',
+    message: `正在下载 ${source.name}...`,
+  };
+  setStatus(startupNotice.message);
+  try {
+    const remote = await fetchRemoteFile(source);
+    if (generation !== documentGeneration) return false;
+    pendingDownload = undefined;
+    return await openSelectedFile(remote, { remoteSource: source, keepURL: options.keepURL });
+  } catch (error) {
+    if (generation !== documentGeneration) return false;
+    pendingDownload = undefined;
+    opening = false;
+    cancelOpen.hidden = true;
+    currentRemoteSource = undefined;
+    if (isCancelledError(error)) return false;
+    startupNotice = { label: '[2/2] 下载失败', message: `下载失败：${error.message}` };
+    setStatus(startupNotice.message);
+    // 下载失败时地址栏不应继续指向打不开的地址。keepURL 表示这条历史记录不是
+    // 本次加载创建的（前进/后退），改写它会让返回目标失去意义。
+    if (!options.keepURL) replaceDocumentURL(undefined);
+    return false;
+  }
+}
+
+// loadRemoteFromLocation 按地址栏参数加载远程文档；没有 ?file= 或参数非法时返回 false。
+// 参数非法只提示不阻塞：启动页照常走完，用户仍可手动选择文件或拖放。
+async function loadRemoteFromLocation(options = {}) {
+  const source = remoteDocumentSource();
+  if (!source) return false;
+  if (source.error) {
+    startupNotice = { label: '[1/2] 无法加载远程文件', message: `无法加载远程文件：${source.error}` };
+    setStatus(startupNotice.message);
+    if (startupProgressActive) {
+      startupProgressLabel.textContent = startupNotice.label;
+      startupMessage.textContent = startupNotice.message;
+    }
+    return false;
+  }
+  return openRemoteDocument(source, options);
+}
+
+// documentURLForSource 构造带 ?file=/?name= 的当前页地址。raw 优先保留用户书写的
+// 相对地址，绝对地址用于原始值不可用的情况。
+function documentURLForSource(source) {
+  const url = new URL(window.location.href);
+  url.search = '';
+  url.hash = '';
+  url.searchParams.set(remoteFileQueryKey, source.raw || source.href);
+  const name = sanitizeRemoteName(source.name);
+  if (name) url.searchParams.set(remoteFileNameQueryKey, name);
+  return url;
+}
+
+// replaceDocumentURL 改写地址栏：远程文档写回 ?file= 以便分享和刷新恢复，
+// 本地文档清掉这两个参数，避免刷新时又去下载上一个远程文件。
+function replaceDocumentURL(source) {
+  if (!window.history?.replaceState) return;
+  const url = source ? documentURLForSource(source) : new URL(window.location.href);
+  if (!source) {
+    url.searchParams.delete(remoteFileQueryKey);
+    url.searchParams.delete(remoteFileNameQueryKey);
+  }
+  const next = `${url.pathname}${url.search}${url.hash}`;
+  if (next === `${window.location.pathname}${window.location.search}${window.location.hash}`) return;
+  window.history.replaceState(null, '', next);
+}
+
 async function loadFile() {
   const selected = file.files[0];
   return openSelectedFile(selected);
 }
 
-async function openSelectedFile(selected) {
-  if (!selected) return;
+async function openSelectedFile(selected, options = {}) {
+  if (!selected) return false;
   startupProgressActive = false;
   startupScreen.hidden = true;
+  // 文档已经在手，启动阶段的提示（包括下载失败）不再有意义。
+  startupNotice = undefined;
   saveReadingPosition();
   const generation = ++documentGeneration;
+  const remoteSource = options.remoteSource;
+  // 本地文件（含最近文件、拖放、系统文件）会清掉 ?file=，避免刷新时又去下载
+  // 上一个远程文件；options.keepURL 用于前进后退触发的重复加载。
+  currentRemoteSource = remoteSource;
+  if (!options.keepURL) replaceDocumentURL(remoteSource);
   opening = true;
   cancelOpen.hidden = false;
   openRequest?.cancel();
@@ -2984,6 +3201,9 @@ async function openSelectedFile(selected) {
   linkRequest?.cancel();
   linkRequest = undefined;
   pageLinks = new Map();
+  pageMediaActions = [];
+  mediaCatalog = [];
+  stopActiveMedia();
   updateSearchStatus('');
   resetRenderProgress();
   resizeObserver?.disconnect();
@@ -3026,9 +3246,9 @@ async function openSelectedFile(selected) {
   try {
     // 在读取和解析新文件前释放旧 Reader，避免切换大文档时新旧文档同时驻留。
     await engine.close();
-    if (generation !== documentGeneration) return;
+    if (generation !== documentGeneration) return false;
     const data = await selected.arrayBuffer();
-    if (generation !== documentGeneration) return;
+    if (generation !== documentGeneration) return false;
     try {
       const fallbackFonts = await preloadFallbackFonts();
       if (!fallbackFontRegistration) {
@@ -3046,12 +3266,12 @@ async function openSelectedFile(selected) {
     } catch (error) {
       throw new Error(`默认中文字体不可用：${error.message}`);
     }
-    if (generation !== documentGeneration) return;
+    if (generation !== documentGeneration) return false;
     openRequest = engine.open(data, openDocumentOptions);
     const result = await openRequest;
-    if (generation !== documentGeneration) return;
+    if (generation !== documentGeneration) return false;
     await injectFonts(result.fonts, generation);
-    if (generation !== documentGeneration) return;
+    if (generation !== documentGeneration) return false;
     const pageCount = Number.isInteger(result.pageCount) && result.pageCount >= 0
       ? result.pageCount
       : (result.pages?.length || 0);
@@ -3062,14 +3282,17 @@ async function openSelectedFile(selected) {
         ? info
         : { index, width: 210, height: 297 };
     });
+    selectedVersionID = '';
+    versionPageFilter = null;
     currentDocumentKey = documentKey(selected);
     sidebarScroll = readSidebarScroll();
     current = restoreReadingPosition(selected, pageInfos.length);
     await applyDocumentPreferences();
-    if (generation !== documentGeneration) return;
+    if (generation !== documentGeneration) return false;
     restorePageRotation();
     buildPages();
     if (activeSidebarTab === 'fonts') renderFonts();
+    if (activeSidebarTab === 'versions') renderVersions();
     if (activeSidebarTab === 'attachments') renderAttachments();
     if (activeSidebarTab === 'media') renderMedia();
     if (activeSidebarTab === 'annotations') renderAnnotations();
@@ -3080,8 +3303,9 @@ async function openSelectedFile(selected) {
     void fetchPageLinks(generation);
     void saveRecentFile(selected);
     void reportMemory('打开文档');
+    return true;
   } catch (error) {
-    if (generation !== documentGeneration || isCancelledError(error)) return;
+    if (generation !== documentGeneration || isCancelledError(error)) return false;
     pageInfos = [];
     pageSpreads = [];
     pageVirtualTrack = undefined;
@@ -3105,6 +3329,7 @@ async function openSelectedFile(selected) {
     documentFontUsageMeta = { scanned: 0, truncated: false };
     outlineExpandState = {};
     if (activeSidebarTab === 'fonts') renderFonts();
+    if (activeSidebarTab === 'versions') renderVersions();
     if (activeSidebarTab === 'attachments') renderAttachments();
     if (activeSidebarTab === 'media') renderMedia();
     if (activeSidebarTab === 'annotations') renderAnnotations();
@@ -3120,6 +3345,10 @@ async function openSelectedFile(selected) {
     current = 0;
     updateNavigation();
     setStatus(`打开失败：${error.message}`);
+    // 打开失败时地址栏不应继续指向打不开的远程文档。
+    currentRemoteSource = undefined;
+    if (remoteSource) replaceDocumentURL(undefined);
+    return false;
   } finally {
     if (generation === documentGeneration) {
       openRequest = undefined;
@@ -3132,6 +3361,15 @@ async function openSelectedFile(selected) {
 function cancelOpening() {
   if (!opening) return;
   documentGeneration++;
+  // 远程文档可能还在下载，先中止请求：否则 openSelectedFile 尚未接管，
+  // 取消后仍会把文件读进来并打开。
+  pendingDownload?.controller.abort();
+  pendingDownload = undefined;
+  // 取消后不再让启动阶段的“正在下载”提示覆盖取消结果：启动页已经让位，
+  // 后续的 WASM/字体就绪事件不应该再改写状态栏。
+  startupNotice = undefined;
+  startupProgressActive = false;
+  currentRemoteSource = undefined;
   openRequest?.cancel();
   openRequest = undefined;
   cancelRequests(pageRequests);
@@ -3178,6 +3416,7 @@ function cancelOpening() {
   documentFontUsageMeta = { scanned: 0, truncated: false };
   outlineExpandState = {};
   if (activeSidebarTab === 'fonts') renderFonts();
+  if (activeSidebarTab === 'versions') renderVersions();
   if (activeSidebarTab === 'attachments') renderAttachments();
   if (activeSidebarTab === 'media') renderMedia();
   if (activeSidebarTab === 'annotations') renderAnnotations();
@@ -4038,9 +4277,9 @@ function restorePanelScroll(panel) {
   if (element) element.scrollTop = sidebarScroll[panel] || 0;
 }
 
-const sidebarTabs = ['thumbnails', 'outline', 'bookmarks', 'fonts', 'attachments', 'media', 'annotations', 'signatures'];
-const sidebarMoreTabs = ['fonts', 'attachments', 'media', 'annotations', 'signatures'];
-const sidebarMoreLabels = { fonts: '字体', attachments: '附件', media: '资源', annotations: '注解', signatures: '签名' };
+const sidebarTabs = ['thumbnails', 'outline', 'bookmarks', 'fonts', 'versions', 'attachments', 'media', 'annotations', 'signatures'];
+const sidebarMoreTabs = ['fonts', 'versions', 'attachments', 'media', 'annotations', 'signatures'];
+const sidebarMoreLabels = { fonts: '字体', versions: '版本', attachments: '附件', media: '资源', annotations: '注解', signatures: '签名' };
 
 // applySidebarPanels 根据侧栏可见性和当前面板，决定缩略图/大纲/书签/字体/附件面板的显隐。
 function applySidebarPanels() {
@@ -4053,6 +4292,7 @@ function applySidebarPanels() {
   if (outlineElement) outlineElement.hidden = !active('outline');
   if (bookmarksElement) bookmarksElement.hidden = !active('bookmarks');
   if (fontsElement) fontsElement.hidden = !active('fonts');
+  if (versionsElement) versionsElement.hidden = !active('versions');
   if (attachmentsElement) attachmentsElement.hidden = !active('attachments');
   if (mediaElement) mediaElement.hidden = !active('media');
   if (annotationsElement) annotationsElement.hidden = !active('annotations');
@@ -4062,9 +4302,10 @@ function applySidebarPanels() {
   if (outlineExpandAll) outlineExpandAll.disabled = Boolean(sidebarFilterValue);
   if (outlineCollapseAll) outlineCollapseAll.disabled = Boolean(sidebarFilterValue);
   if (sidebarFilter) {
-    const filterable = active('outline') || active('bookmarks') || active('fonts') || active('attachments') || active('media') || active('annotations') || active('signatures');
+    const filterable = active('outline') || active('bookmarks') || active('fonts') || active('versions') || active('attachments') || active('media') || active('annotations') || active('signatures');
     sidebarFilter.hidden = !filterable;
     if (active('fonts')) sidebarFilter.placeholder = '过滤字体';
+    else if (active('versions')) sidebarFilter.placeholder = '过滤版本';
     else if (active('attachments')) sidebarFilter.placeholder = '过滤附件';
     else if (active('media')) sidebarFilter.placeholder = '过滤资源';
     else if (active('annotations')) sidebarFilter.placeholder = '过滤注解';
@@ -4087,6 +4328,7 @@ function applySidebarPanels() {
     sidebarTabMoreLabel.textContent = moreActive ? (sidebarMoreLabels[activeSidebarTab] || '更多') : '更多';
   }
   sidebarMoreFonts?.classList.toggle('active', activeSidebarTab === 'fonts');
+  sidebarMoreVersions?.classList.toggle('active', activeSidebarTab === 'versions');
   sidebarMoreAttachments?.classList.toggle('active', activeSidebarTab === 'attachments');
   sidebarMoreMedia?.classList.toggle('active', activeSidebarTab === 'media');
   sidebarMoreAnnotations?.classList.toggle('active', activeSidebarTab === 'annotations');
@@ -4140,6 +4382,8 @@ function setSidebarTab(tab) {
   } else if (tab === 'bookmarks') {
     renderBookmarks();
     updateOutlineActive();
+  } else if (tab === 'versions') {
+    renderVersions();
   } else if (tab === 'attachments') {
     renderAttachments();
   } else if (tab === 'media') {
@@ -4859,6 +5103,77 @@ function buildAttachmentItem(item) {
   return row;
 }
 
+let selectedVersionID = '';
+let versionPageFilter = null;
+
+function renderVersions() {
+  if (!versionsElement) return;
+  const generation = documentGeneration;
+  versionsElement.replaceChildren();
+  if (!pageInfos.length) {
+    versionsElement.append(outlineEmptyMessage('未打开文档'));
+    return;
+  }
+  versionsElement.append(outlineEmptyMessage('正在读取版本...'));
+  engine.versions().then(list => {
+    if (generation !== documentGeneration) return;
+    const versions = Array.isArray(list) ? list : [];
+    versionsElement.replaceChildren();
+    if (!versions.length) {
+      versionsElement.append(outlineEmptyMessage('此文档没有版本'));
+      return;
+    }
+    const filtered = sidebarFilterValue
+      ? versions.filter(item => `${item.id || ''} ${item.name || ''} ${item.version || ''}`.toLowerCase().includes(sidebarFilterValue))
+      : versions;
+    if (!filtered.length) {
+      versionsElement.append(outlineEmptyMessage('无匹配结果'));
+      return;
+    }
+    if (!filtered.some(item => item.id === selectedVersionID)) selectedVersionID = '';
+    filtered.forEach(item => versionsElement.append(buildVersionItem(item)));
+    restorePanelScroll('versions');
+  }).catch(() => {
+    if (generation !== documentGeneration) return;
+    versionsElement.replaceChildren(outlineEmptyMessage('获取版本失败'));
+  });
+}
+
+function buildVersionItem(item) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'outline-label';
+  if (item.id === selectedVersionID) button.classList.add('active');
+  const title = [item.id, item.name, item.version].filter(Boolean).join(' ');
+  button.textContent = title || '版本';
+  if (item.current) button.textContent += ' · 当前';
+  const pages = Array.isArray(item.pages) ? item.pages.filter(page => Number.isInteger(page)) : [];
+  button.title = pages.length ? `包含第 ${pages.map(page => page + 1).join('、')} 页` : '没有可显示的页面';
+  button.addEventListener('click', () => {
+    selectedVersionID = selectedVersionID === item.id ? '' : item.id;
+    applyVersionPages(selectedVersionID ? pages : null);
+    renderVersions();
+  });
+  return button;
+}
+
+function applyVersionPages(pages) {
+  versionPageFilter = pages ? new Set(pages) : null;
+  pageCards.forEach((card, index) => { card.hidden = versionPageFilter ? !versionPageFilter.has(index) : false; });
+  thumbnailButtons.forEach(button => button?.remove());
+  thumbnailButtons = [];
+  thumbnailSlots = thumbnailSlotsForLayout();
+  thumbnailSlotByPage = [];
+  thumbnailSlots.forEach((index, slot) => {
+    if (index >= 0) thumbnailSlotByPage[index] = slot;
+  });
+  updateThumbnailMetrics();
+  updateThumbnailVirtualWindow(false);
+  if (!pages) return;
+  const first = pages.find(page => page >= 0 && page < pageInfos.length);
+  if (first !== undefined) goTo(first);
+}
+
 function renderAttachments() {
   if (!attachmentsElement) return;
   const generation = documentGeneration;
@@ -5572,7 +5887,9 @@ function fetchPageLinks(generation) {
     const external = typeof item.uri === 'string' && item.uri !== '';
     const target = Number(item.target_page);
     const internal = Number.isInteger(target) && target >= 0;
-    if (!external && !internal) return;
+    const media = item.media_kind === 'sound' || item.media_kind === 'movie';
+    const attachment = typeof item.attachment_id === 'string' && item.attachment_id !== '';
+    if (!external && !internal && !media && !attachment) return;
     const bucket = pageLinks.get(item.page);
     if (bucket) bucket.push(item);
     else pageLinks.set(item.page, [item]);
@@ -5582,22 +5899,30 @@ function fetchPageLinks(generation) {
   };
   const annotationsRequest = engine.annotations();
   const pageLinksRequest = engine.pageLinks();
+  const mediaActionsRequest = engine.pageMediaActions();
+  const mediaRequest = engine.media();
   linkRequest = {
     cancel: () => {
       annotationsRequest.cancel?.();
       pageLinksRequest.cancel?.();
+      mediaActionsRequest.cancel?.();
+      mediaRequest.cancel?.();
     },
   };
   Promise.all([
     annotationsRequest.catch(() => []),
     pageLinksRequest.catch(() => []),
-  ]).then(([annotations, pageGraphicLinks]) => {
+    mediaActionsRequest.catch(() => []),
+    mediaRequest.catch(() => []),
+  ]).then(([annotations, pageGraphicLinks, mediaActions, media]) => {
     if (generation !== documentGeneration) return;
     const annotationList = Array.isArray(annotations) ? annotations : [];
     annotationList.forEach(item => {
       if (item && item.type === 'Link') addLink(item);
     });
     collect(pageGraphicLinks);
+    pageMediaActions = Array.isArray(mediaActions) ? mediaActions : [];
+    mediaCatalog = Array.isArray(media) ? media : [];
     applyPageLinks();
   }).catch(() => {
     if (generation !== documentGeneration) return;
@@ -5626,7 +5951,11 @@ function applyPageLinks(index) {
       hotspot.style.width = `${(boundary.width / info.width) * 100}%`;
       hotspot.style.height = `${(boundary.height / info.height) * 100}%`;
       const external = typeof link.uri === 'string' && link.uri !== '';
-      hotspot.title = external ? link.uri : `跳转到第 ${(Number(link.target_page) || 0) + 1} 页`;
+      const media = link.media_kind === 'sound' || link.media_kind === 'movie';
+      const attachment = typeof link.attachment_id === 'string' && link.attachment_id !== '';
+      hotspot.title = attachment
+        ? `打开附件 ${link.attachment_name || link.attachment_id}`
+        : external ? link.uri : media ? (link.media_kind === 'sound' ? '播放声音' : '播放影片') : `跳转到第 ${(Number(link.target_page) || 0) + 1} 页`;
       hotspot.setAttribute('aria-label', hotspot.title);
       hotspot.addEventListener('click', () => openPageLink(link));
       layer.append(hotspot);
@@ -5634,8 +5963,92 @@ function applyPageLinks(index) {
   });
 }
 
+function mediaActionKey(action) {
+  return `${action.scope}:${action.media_id}`;
+}
+
+function stopActiveMedia(key) {
+  const entries = key ? [[key, activeMedia.get(key)]] : Array.from(activeMedia.entries());
+  entries.forEach(([entryKey, entry]) => {
+    if (!entry) return;
+    entry.element.pause();
+    entry.element.remove();
+    if (entry.url) URL.revokeObjectURL(entry.url);
+    activeMedia.delete(entryKey);
+  });
+}
+
+async function ensureMediaElement(action) {
+  const key = mediaActionKey(action);
+  const existing = activeMedia.get(key);
+  if (existing) return existing;
+  const data = await engine.mediaData(Number(action.scope) || 0, Number(action.media_id), 0);
+  if (!(data instanceof ArrayBuffer) && !(data instanceof Uint8Array)) {
+    throw new Error('媒体资源为空');
+  }
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const described = mediaCatalog.find(item => Number(item.scope) === (Number(action.scope) || 0) && Number(item.id) === Number(action.media_id));
+  const mime = mediaMime(described || { type: action.media_kind === 'sound' ? 'Audio' : 'Video' });
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime || (action.media_kind === 'sound' ? 'audio/mpeg' : 'video/mp4') }));
+  const element = document.createElement(action.media_kind === 'sound' ? 'audio' : 'video');
+  element.src = url;
+  element.preload = 'auto';
+  if (action.media_kind === 'movie') {
+    element.controls = true;
+    element.style.position = 'fixed';
+    element.style.left = '50%';
+    element.style.top = '50%';
+    element.style.transform = 'translate(-50%, -50%)';
+    element.style.zIndex = '40';
+    element.style.maxWidth = 'min(720px, 80vw)';
+    element.style.maxHeight = '70vh';
+    element.style.background = '#000';
+    document.body.append(element);
+  }
+  const entry = { element, url };
+  activeMedia.set(key, entry);
+  element.addEventListener('ended', () => {
+    if (!element.loop) stopActiveMedia(key);
+  });
+  return entry;
+}
+
+async function playMediaAction(action) {
+  if (!action || !(Number(action.media_id) > 0)) return;
+  const operator = String(action.operator || 'Play');
+  const key = mediaActionKey(action);
+  if (operator === 'Stop') {
+    stopActiveMedia(key);
+    return;
+  }
+  try {
+    const entry = await ensureMediaElement(action);
+    if (operator === 'Pause') {
+      entry.element.pause();
+      return;
+    }
+    if (action.media_kind === 'sound') {
+      const volume = Number(action.volume);
+      if (Number.isFinite(volume)) entry.element.volume = Math.max(0, Math.min(1, volume / 100));
+      entry.element.loop = !!action.repeat;
+    }
+    if (operator === 'Play') entry.element.currentTime = 0;
+    await entry.element.play();
+  } catch (error) {
+    setStatus(error?.message || '无法播放媒体');
+  }
+}
+
 // openPageLink 处理链接点击：外部链接在新窗口打开，内部跳转按目标位置滚动。
 function openPageLink(link) {
+  if (link.media_kind === 'sound' || link.media_kind === 'movie') {
+    playMediaAction(link);
+    return;
+  }
+  if (typeof link.attachment_id === 'string' && link.attachment_id !== '') {
+    openAttachmentLink(link);
+    return;
+  }
   if (typeof link.uri === 'string' && link.uri !== '') {
     window.open(link.uri, '_blank', 'noopener');
     return;
@@ -5643,6 +6056,37 @@ function openPageLink(link) {
   const target = Number(link.target_page);
   if (!Number.isInteger(target) || target < 0 || target >= pageInfos.length) return;
   goToDestination(target, link.dest);
+}
+
+// openAttachmentLink 执行 GotoA 附件动作：可预览类型在新标签页打开，其它类型
+// 触发下载。缺少清单信息时退回链接携带的名称/ID。
+async function openAttachmentLink(link) {
+  const scope = Number(link.scope) || 0;
+  const id = String(link.attachment_id || '');
+  if (!id) return;
+  let item = { scope, id, name: link.attachment_name || id };
+  try {
+    const list = await engine.attachments();
+    const found = (Array.isArray(list) ? list : []).find(entry => Number(entry.scope) === scope && String(entry.id) === id);
+    if (found) item = found;
+  } catch {
+    // 清单读取失败时沿用链接携带的信息。
+  }
+  try {
+    const data = await engine.attachmentData(scope, id, 0);
+    const mime = attachmentPreviewMime(item);
+    if (mime) {
+      const url = URL.createObjectURL(new Blob([data], { type: mime }));
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setStatus(`已打开附件：${item.name || id}`);
+      return;
+    }
+    downloadBytes(data, safeResourceName(item, 'attachment'), 'application/octet-stream');
+    setStatus(`已下载附件：${item.name || id}`);
+  } catch (error) {
+    setStatus(`打开附件失败：${error?.message || error}`);
+  }
 }
 
 // goToDestination 跳转到指定页；有目标位置时按 Dest 的 Top/Left/Zoom 精确定位，
@@ -5929,6 +6373,7 @@ sidebarTabOutline?.addEventListener('click', () => setSidebarTab('outline'));
 sidebarTabBookmarks?.addEventListener('click', () => setSidebarTab('bookmarks'));
 sidebarTabMore?.addEventListener('click', () => setSidebarMoreOpen(sidebarMoreMenu?.hidden));
 sidebarMoreFonts?.addEventListener('click', () => setSidebarTab('fonts'));
+sidebarMoreVersions?.addEventListener('click', () => setSidebarTab('versions'));
 sidebarMoreAttachments?.addEventListener('click', () => setSidebarTab('attachments'));
 sidebarMoreMedia?.addEventListener('click', () => setSidebarTab('media'));
 sidebarMoreAnnotations?.addEventListener('click', () => setSidebarTab('annotations'));
@@ -5969,6 +6414,7 @@ if (sidebarFilter) {
     if (activeSidebarTab === 'outline') renderOutline();
     else if (activeSidebarTab === 'bookmarks') renderBookmarks();
     else if (activeSidebarTab === 'fonts') renderFonts();
+    else if (activeSidebarTab === 'versions') renderVersions();
     else if (activeSidebarTab === 'attachments') renderAttachments();
     else if (activeSidebarTab === 'media') renderMedia();
     else if (activeSidebarTab === 'annotations') renderAnnotations();
@@ -6011,6 +6457,7 @@ if (sidebarResizer) {
 sidebarScrollPanels.outline = outlineElement;
 sidebarScrollPanels.bookmarks = bookmarksElement;
 sidebarScrollPanels.fonts = fontsElement;
+sidebarScrollPanels.versions = versionsElement;
 sidebarScrollPanels.attachments = attachmentsElement;
 sidebarScrollPanels.media = mediaElement;
 sidebarScrollPanels.annotations = annotationsElement;
@@ -6212,5 +6659,17 @@ function setRecentPanelOpen(open) {
     void refreshRecentFiles();
   }
 }
+
+// popstate 后按新地址重新加载：地址栏被改写为 ?file= 后，前进后退可以在文档
+// 之间切换。没有 ?file= 说明目标地址不带远程文档，保持当前文档不动。
+window.addEventListener('popstate', () => {
+  const source = remoteDocumentSource();
+  if (!source || source.error) return;
+  if (currentRemoteSource?.href === source.href || pendingDownload?.href === source.href) return;
+  void loadRemoteFromLocation({ keepURL: true });
+});
+
+// 启动即按 ?file= 加载：不等 WASM 初始化，下载与模块、字体加载并行。
+void loadRemoteFromLocation();
 
 void refreshRecentFiles();

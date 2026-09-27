@@ -96,6 +96,8 @@ async function execute(message) {
       return unwrap(self.ofd.fontUsage(message.scope, message.fontID, message.maxScan, message.maxPages));
     case 'fontUsageAll':
       return unwrap(self.ofd.fontUsageAll(message.maxScan, message.maxPages));
+    case 'versions':
+      return unwrap(self.ofd.versions());
     case 'attachments':
       return unwrap(self.ofd.attachments());
     case 'attachmentData': {
@@ -114,6 +116,8 @@ async function execute(message) {
       return unwrap(self.ofd.annotations());
     case 'pageLinks':
       return unwrap(self.ofd.pageLinks());
+    case 'pageMediaActions':
+      return unwrap(self.ofd.pageMediaActions());
     case 'signatures':
       return unwrap(self.ofd.signatures());
     case 'signatureCertificate': {
