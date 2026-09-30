@@ -1,0 +1,175 @@
+---
+layout: default
+---
+<section class="hero">
+  <div class="wrap hero-inner">
+    <img class="hero-icon" src="{{ '/assets/images/icon.svg' | relative_url }}" alt="彩票号码分析助手图标" width="104" height="104">
+    <div>
+      <h1>彩票号码分析助手</h1>
+      <p class="hero-tagline">开奖号码查询、走势图表、号码集合运算与复式拆分，一站式彩票数据分析工具。</p>
+      <ul class="hero-meta">
+        <li>版本 {{ site.version }}</li>
+        <li>Android</li>
+        <li>免费无广告弹窗</li>
+        <li>数据本地保存</li>
+      </ul>
+      <div class="hero-actions">
+        <a class="btn btn-play" href="{{ site.share_weiyun_url }}" rel="noopener">
+          <img src="{{ '/assets/images/google-play.png' | relative_url }}" alt="从 Google Play 下载 彩票号码分析助手" width="155" height="47">
+        </a>
+        <a class="btn btn-ghost" href="{{ '/changelog.html' | relative_url }}">查看更新记录</a>
+      </div>
+      <p class="hero-note">无法从 Google Play 下载？<a href="http://zc310.tech/blog/about/">请联系我</a> 获取安装包。</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">支持彩种</span>
+      <h2>覆盖主流福彩与体彩玩法</h2>
+      <p>每个彩种均可查询最新开奖号与历史奖号，并查看常用条件的走势与遗漏数据。</p>
+    </div>
+    <div class="lottery-groups">
+      <div class="lottery-group">
+        <h3>中国福利彩票</h3>
+        <ul class="chips">
+          <li class="is-key">双色球</li>
+          <li class="is-key">福彩 3D</li>
+          <li>七乐彩</li>
+        </ul>
+      </div>
+      <div class="lottery-group">
+        <h3>中国体育彩票</h3>
+        <ul class="chips">
+          <li class="is-key">大乐透</li>
+          <li class="is-key">排列 3</li>
+          <li>排列 5</li>
+          <li>七星彩</li>
+          <li>足彩胜负彩（任选 9 场）</li>
+          <li>6 场半全场</li>
+          <li>4 场进球</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">主要功能</span>
+      <h2>从开奖查询到复式拆分的完整工具链</h2>
+    </div>
+    <ul class="cards">
+      <li class="card">
+        <span class="card-icon" aria-hidden="true">查</span>
+        <h3>开奖号码查询</h3>
+        <p>最新开奖号与完整历史奖号，支持按期数、按期号、按日期、按星期查询。</p>
+        <ul class="card-tags">
+          <li>历史奖号</li>
+          <li>期号 / 日期 / 星期</li>
+        </ul>
+      </li>
+      <li class="card">
+        <span class="card-icon" aria-hidden="true">图</span>
+        <h3>走势图表</h3>
+        <p>每个彩种均可查看常用条件的折线图、柱状图、散点图、走势表格与遗漏数据。</p>
+        <ul class="card-tags">
+          <li>折线图</li>
+          <li>柱状图</li>
+          <li>散点图</li>
+          <li>遗漏查询</li>
+        </ul>
+      </li>
+      <li class="card">
+        <span class="card-icon" aria-hidden="true">算</span>
+        <h3>集合运算</h3>
+        <p>对号码集合做交集、差集、合并（含重复）、并集（去重复）、不同注与交集筛选（重复次数）。</p>
+        <ul class="card-tags">
+          <li>交集 / 差集</li>
+          <li>合并 / 并集</li>
+          <li>交集筛选</li>
+        </ul>
+      </li>
+      <li class="card">
+        <span class="card-icon" aria-hidden="true">选</span>
+        <h3>号码浏览与拆分</h3>
+        <p>号码复制、分享、排序与自由选注（按顺序、随机等方式截取号码）；大文件可按行数平均拆分为多个小文件。</p>
+        <ul class="card-tags">
+          <li>自由选注</li>
+          <li>排序 / 分享</li>
+          <li>文件拆分</li>
+        </ul>
+      </li>
+      <li class="card">
+        <span class="card-icon" aria-hidden="true">拆</span>
+        <h3>复式与单式互转</h3>
+        <p>支持复式合并为单式、复式分解为单式，并可查看号码文件分布，覆盖足彩 14 场、任选九场、进球彩、半全场、七星彩、排列 3/5 及双色球、大乐透、七乐彩、15 选 5。</p>
+        <ul class="card-tags">
+          <li>合并单式</li>
+          <li>拆分单式</li>
+          <li>号码分布</li>
+        </ul>
+      </li>
+      <li class="card">
+        <span class="card-icon" aria-hidden="true">倍</span>
+        <h3>奖金与倍投计算</h3>
+        <p>奖金计算覆盖双色球、大乐透、七乐彩；倍投计算器支持排列三、福彩 3D、快 3、11 选 5、上海时时乐、重庆时时彩等玩法的奖项选择。</p>
+        <ul class="card-tags">
+          <li>奖金计算</li>
+          <li>倍投计算器</li>
+        </ul>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="crosslink">
+      <div>
+        <h3>彩票网站导航</h3>
+        <p>内置各地福彩中心、体彩中心网站入口，开奖公告与玩法规则查询一步直达。</p>
+      </div>
+      <a class="btn btn-ghost" href="https://www.cwl.gov.cn/" rel="noopener noreferrer">福彩中心</a>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="showcase">
+      <figure class="phone">
+        <a href="{{ '/assets/images/thumbnail.jpg' | relative_url }}">
+          <img src="{{ '/assets/images/thumbnail.jpg' | relative_url }}" alt="彩票号码分析助手软件截图：奖号列表与走势图表" width="1440" height="1919" loading="lazy">
+        </a>
+        <figcaption>点击查看完整大图</figcaption>
+      </figure>
+      <div class="showcase-text">
+        <span class="eyebrow">软件截图</span>
+        <h2>一个应用，管理全部彩种</h2>
+        <p>界面按彩种区分主题颜色，奖号列表标注今天开奖，支持长历史期号快速定位。</p>
+        <ul class="showcase-points">
+          <li>主题颜色跟随彩种，所见即所得</li>
+          <li>走势图与遗漏数据支持 3000 期以上查询</li>
+          <li>选号与查询条件会记住上次使用</li>
+        </ul>
+        <a class="btn" href="{{ site.share_weiyun_url }}" rel="noopener">立即下载</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="crosslink">
+      <div>
+        <h3>OFD WASM 阅读器</h3>
+        <p>同一站点的另一个作品：基于 WebAssembly 的 OFD 文档阅读器，浏览器中直接查看、缩放、搜索、打印并导出 OFD 版式文件，无需安装插件。</p>
+      </div>
+      <a class="btn btn-ghost" href="{{ '/ofd-wasm/' | relative_url }}">打开阅读器</a>
+    </div>
+  </div>
+</section>

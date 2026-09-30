@@ -1,3 +1,9 @@
+---
+layout: page
+title: 隐私政策（BoltDB Viewer）
+description: BoltDB Viewer 应用的隐私政策，说明个人信息收集、使用、披露与联系方式。
+---
+
 **Privacy Policy**
 
 zc310.tech built the BoltDB Viewer app as an Open Source app. This SERVICE is provided by zc310.tech at no cost and is intended for use as is.

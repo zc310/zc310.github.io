@@ -1,51 +1,52 @@
 <!doctype html>
-<html lang="{{ site.lang | default: "en-US" }}">
-  <head>
-    <meta charset="utf-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+<html lang="{{ site.lang | default: 'zh-CN' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#172033" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#11151f" media="(prefers-color-scheme: dark)">
+  {% seo %}
+  <link rel="icon" href="{{ '/assets/images/icon.svg' | relative_url }}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="{{ '/assets/images/apple-touch-icon.png' | relative_url }}">
+  <link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}?v={{ site.github.build_revision }}">
+</head>
+<body class="page">
+  <a class="skip" href="#main">跳到主要内容</a>
 
-{% seo %}
-    <link rel="stylesheet" href="{{ '/assets/css/style.css?v=' | append: site.github.build_revision | relative_url }}">
-    <script src="https://code.jquery.com/jquery-1.12.4.min.js" integrity="sha256-ZosEbRLbNQzLpnKIkEdrPv7lOy9C27hHQ+Xp8a4MxAQ=" crossorigin="anonymous"></script>
-    <script src="{{ '/assets/js/respond.js' | relative_url }}"></script>
-    <!--[if lt IE 9]>
-      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
-    <![endif]-->
-    <!--[if lt IE 8]>
-    <link rel="stylesheet" href="{{ '/assets/css/ie.css' | relative_url }}">
-    <![endif]-->
-    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-    {% include head-custom.html %}
-  </head>
-  <body>
-      <div id="header">
-        <nav>
-          <ul>
-            <li class="fork"><a href="{{ site.share_weiyun_url }}"><img src="/assets/images/google-play.png" alt="下载彩票号码分析助手" /></a></li>
-            {% if site.show_downloads %}
-              <li class="downloads"><a href="{{ site.github.zip_url }}">ZIP</a></li>
-              <li class="downloads"><a href="{{ site.github.tar_url }}">TAR</a></li>
-              <li class="title">DOWNLOADS</li>
-            {% endif %}
-          </ul>
-        </nav>
-      </div><!-- end header -->
-
-    <div class="wrapper">
-
-      <section>
-        <div id="title">
-          <h1>{{ site.title | default: site.github.repository_name }}</h1>
-          <p>{{ site.description | default: site.github.project_tagline }}</p>
-          <hr>
-          <span class="credits left">Project maintained by <a href="{{ site.github.owner_url }}">{{ site.github.owner_name }}</a></span>
-          <span class="credits right">Hosted on GitHub Pages &mdash; Theme by <a href="https://twitter.com/mattgraham">mattgraham</a></span>
-        </div>
-
-        {{ content }}
-
-      </section>
-
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="{{ '/' | relative_url }}">
+        <img src="{{ '/assets/images/icon.svg' | relative_url }}" alt="" width="30" height="30">
+        <span>彩票号码分析助手</span>
+      </a>
+      <nav class="site-nav" aria-label="主导航">
+        {%- for item in site.nav %}
+        <a href="{{ item.url | relative_url }}"{% if page.nav == item.nav %} aria-current="page"{% endif %}>{{ item.title }}</a>
+        {%- endfor %}
+        <a class="btn btn-sm" href="{{ site.share_weiyun_url }}" rel="noopener">下载</a>
+      </nav>
     </div>
-  </body>
+  </header>
+
+  <main id="main">
+    {{ content }}
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <div>
+        <p class="footer-brand">彩票号码分析助手</p>
+        <p class="footer-note">免费的开奖号码查询与走势分析工具</p>
+      </div>
+      <nav class="footer-links" aria-label="页脚导航">
+        <a href="{{ '/changelog.html' | relative_url }}">更新记录</a>
+        <a href="{{ '/ofd-wasm/' | relative_url }}">OFD WASM 阅读器</a>
+        <a href="{{ '/privacy/rich_helper.html' | relative_url }}">隐私政策（号码助手）</a>
+        <a href="{{ '/privacy/boltdb.viewer.html' | relative_url }}">隐私政策（BoltDB Viewer）</a>
+        <a href="http://zc310.tech/blog/about/">联系我</a>
+      </nav>
+    </div>
+    <p class="footer-copy">© zc310 · 由 GitHub Pages 托管</p>
+  </footer>
+</body>
 </html>

@@ -1,9 +1,22 @@
+lang: zh-CN
+
 title: 彩票号码分析助手
-description: 彩票号码查询分析工具.
-show_downloads: false
+description: 彩票开奖号码查询与走势分析工具，支持双色球、大乐透、福彩 3D、排列 3、排列 5、七星彩、足彩 14 场等主流彩种的号码查询、走势图表、集合运算与复式拆分。
+# 与 version.yml 保持一致
+version: 1.1.2
+
 google_analytics: UA-347760-28
 theme: jekyll-theme-midnight
 
-
 share_weiyun_url: https://play.google.com/store/apps/details?id=zc310.tech.rich.helper
 
+nav:
+  - nav: home
+    title: 首页
+    url: /
+  - nav: changelog
+    title: 更新记录
+    url: /changelog.html
+  - nav: ofd
+    title: OFD 阅读器
+    url: /ofd-wasm/

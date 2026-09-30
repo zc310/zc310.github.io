@@ -1,3 +1,10 @@
+---
+layout: page
+nav: changelog
+title: 更新记录
+description: 彩票号码分析助手的历史版本记录，包含新功能、优化与问题修复。
+---
+
 # 更新记录
 
 ## 2021-11-21
