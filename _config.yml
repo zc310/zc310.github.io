@@ -19,4 +19,4 @@ nav:
     url: /changelog.html
   - nav: ofd
     title: OFD 阅读器
-    url: /ofd-wasm/
+    url: https://zc310.github.io/ofd/wasm/
