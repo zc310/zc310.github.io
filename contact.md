@@ -1,5 +1,6 @@
 ---
 layout: contact
+nav: contact
 title: 联系我们
 description: 彩票号码分析助手的联系方式：问题反馈、功能建议、安装包获取与商务合作。
 ---
