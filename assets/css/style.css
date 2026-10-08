@@ -532,6 +532,8 @@ code {
   background: var(--surface);
   box-shadow: var(--shadow-1);
 }
+.crosslink + .crosslink { margin-top: 18px; }
+
 .crosslink h3 { font-size: 16.5px; }
 .crosslink > div { flex: 1 1 420px; min-width: 0; }
 .crosslink p { margin: 4px 0 0; color: var(--muted); font-size: 14.5px; }
