@@ -20,3 +20,6 @@ nav:
   - nav: ofd
     title: OFD 阅读器
     url: https://zc310.github.io/ofd/wasm/
+  - nav: contact
+    title: 联系我们
+    url: /contact.html
